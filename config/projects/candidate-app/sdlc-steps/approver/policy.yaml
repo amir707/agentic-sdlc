@@ -1,0 +1,3 @@
+# Approval gate override for candidate-app: who may decide the gate.
+approvers:
+  - amir707

@@ -1,0 +1,11 @@
+# Synthetic monitor + incident resolver policy (deterministic workers).
+# Override per project at
+# config/projects/<name>/sdlc-steps/monitor/policy.yaml.
+# Demo-small windows keep incident open/resolve cycles at seconds for
+# fast iteration; production values would be minutes.
+
+probe_interval_seconds: 5
+window_seconds: 15
+error_threshold: 0.3
+# Hysteresis: resolve only after this many consecutive healthy windows.
+resolver_recovery_windows: 2

@@ -1,0 +1,7 @@
+# Pipeline flow control (orchestrator behavior, not any single step).
+# Override per project at
+# config/projects/<name>/sdlc-steps/orchestrator/policy.yaml.
+
+# Generator-critic loop bounds — no unbounded agent loops of any kind.
+max_fix_iterations: 2        # reviewer round-trips before human escalation
+max_flag_fix_iterations: 1   # verify's flag-required return before escalation

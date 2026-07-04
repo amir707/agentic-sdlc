@@ -1,0 +1,17 @@
+# Project definition: candidate-app.
+# Everything the engine needs to know about the governed project lives
+# under config/candidate-app/; the engine itself is project-agnostic.
+
+repo: amir707/candidate-app
+
+cloud_run:
+  service: candidate-app
+
+# Deterministic module-to-area map (diff analysis assigns each file the
+# area of its first matching prefix, else default_area).
+areas:
+  payments:
+    - app/payments
+  catalog:
+    - app/catalog
+default_area: core
