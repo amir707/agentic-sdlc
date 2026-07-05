@@ -24,12 +24,12 @@
   {
     "id": "PAY-102",
     "title": "Add service-fee line to payments summary",
-    "description": "Ops wants a service_fee field shown on GET /payments/summary, computed as a fixed 1.5% of captured_total. Just one more display field on the summary payload.",
+    "description": "Ops wants a service_fee figure shown in the summary reporting their dashboard consumes, computed as a fixed 1.5% of captured totals. Just one more display field on a summary payload.",
     "type": "story",
     "implementation": "agent",
     "claimed_risk": "low",
     "claimed_impact": "medium",
-    "area_hint": "payments",
+    "area_hint": "core",
     "priority_rank": 3
   },
   {

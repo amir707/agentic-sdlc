@@ -87,3 +87,25 @@ Composition order at invocation:
 
 Second implementations are documented, never built: scope caps are
 verification budget, not typing budget.
+
+## Framework boundary (ADR-0007)
+
+The SDLC core is framework-agnostic: `orchestrator/invoker.py` defines
+the AgentInvoker port (AgentSpec in — prompt, model name, declared tool
+needs — Invocation out), and `sdlc_steps/*/spec.py` DECLARE tools
+(plain callables, or a `StoreTools` filter) rather than constructing
+them. Exactly one package speaks ADK: `adapters/adk/` materializes
+specs into `LlmAgent`s (LiteLLM bridging, MCP toolsets, token metering
+via `after_model_callback`, `output_schema` on the tool-less approver)
+and renders the per-item pipeline as a native ADK 2 `Workflow` whose
+routed cycle edges realize the definition's back-edges. The composition
+root (`orchestrator/__main__.py`) is the only file that chooses a
+framework. `tests/test_framework_boundary.py` enforces all of this
+structurally, and structured verdicts (`orchestrator/schemas.py`)
+validate every agent decision at the boundary.
+
+Dev loop: `make adk-web` (entries in `tests/debug/adk_web/`, one shared
+bootstrap) serves each reasoning worker in `adk web` with exactly the
+pipeline's prompt/model/tools; `evals/` carries the
+risk-assessor dataset (Vertex eval schema) beside the deterministic
+pipeline eval.

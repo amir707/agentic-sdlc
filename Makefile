@@ -23,7 +23,10 @@ orchestrate:
 deploy-baseline:
 	$(PYTHON) -m adapters.deploy baseline
 
+adk-web:
+	.venv/bin/adk web tests/debug/adk_web
+
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline test
+.PHONY: seed mcp monitor orchestrate deploy-baseline adk-web test

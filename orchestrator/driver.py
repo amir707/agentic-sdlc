@@ -25,8 +25,9 @@ from orchestrator.config import ProjectConfig
 from orchestrator.dependency_graph import blast_radius, build_import_graph
 from tools.diff_analysis import files_touched
 from orchestrator.gate import await_decision
-from orchestrator.invoker import ADKInvoker, Invocation
+from orchestrator.invoker import AgentInvoker, Invocation
 from orchestrator.json_util import extract_json
+from orchestrator import schemas
 from orchestrator.rejection import Rejection, reject
 from adapters.repo_host import GitHubRepoHost
 from adapters.store_client import DeliveryStore
@@ -53,7 +54,7 @@ class RunContext:
     project: ProjectConfig
     store: DeliveryStore
     repo_host: GitHubRepoHost
-    invoker: ADKInvoker
+    invoker: AgentInvoker
     workspace: Workspace
     approved: list[ApprovedPR] = field(default_factory=list)
 
@@ -174,47 +175,56 @@ def _coverage_summary(ctx: RunContext) -> str:
     return (proc.stdout + proc.stderr)[-2500:]
 
 
+async def review_once(ctx: RunContext, item: dict, pr: int,
+                      iteration: int) -> schemas.ReviewVerdict:
+    """One review round (single-shot: the Workflow expression reuses
+    this as a node; the driver loops it below). Posts the verdict as a
+    PR comment and returns it schema-validated."""
+    diff = ctx.repo_host.get_diff(pr)
+    closure = blast_radius(ctx.workspace.dir, files_touched(diff))
+    payload = {
+        "task": ("Review this PR. Reply ONLY with JSON: "
+                 '{"verdict": "approve|request_changes|out_of_scope", '
+                 '"reasoning": "...", '
+                 '"comments": [{"body": "...", "blocking": true}]}'),
+        "item": item,
+        "diff": diff,
+        "coverage_report": _coverage_summary(ctx),
+        "dependency_closure": sorted(closure),
+    }
+    result = await ctx.invoke(
+        reviewer_spec.build(ctx.project, str(ctx.workspace.dir), diff),
+        json.dumps(payload, indent=2))
+    verdict = schemas.ReviewVerdict.model_validate(extract_json(result.text))
+
+    findings = "\n".join(
+        f"- {'🔴 blocking' if c.blocking else '⚪ cosmetic'}: {c.body}"
+        for c in verdict.comments) or "- no findings"
+    ctx.repo_host.post_comment(pr, (
+        f"**Review ({verdict.verdict})** — iteration {iteration + 1}\n\n"
+        f"{verdict.reasoning}\n\n{findings}"))
+    return verdict
+
+
 async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
                             branch: str) -> bool:
     max_iterations = int(
         ctx.project.policy("orchestrator")["max_fix_iterations"])
 
     for iteration in range(max_iterations + 1):
-        diff = ctx.repo_host.get_diff(pr)
-        closure = blast_radius(ctx.workspace.dir, files_touched(diff))
-        payload = {
-            "task": ("Review this PR. Reply ONLY with JSON: "
-                     '{"verdict": "approve|request_changes|out_of_scope", '
-                     '"reasoning": "...", '
-                     '"comments": [{"body": "...", "blocking": true}]}'),
-            "item": item,
-            "diff": diff,
-            "coverage_report": _coverage_summary(ctx),
-            "dependency_closure": sorted(closure),
-        }
-        result = await ctx.invoke(
-            reviewer_spec.build(ctx.project, str(ctx.workspace.dir), diff),
-            json.dumps(payload, indent=2))
-        verdict = extract_json(result.text)
+        verdict = await review_once(ctx, item, pr, iteration)
 
-        findings = "\n".join(
-            f"- {'🔴 blocking' if c.get('blocking') else '⚪ cosmetic'}: {c['body']}"
-            for c in verdict.get("comments", [])) or "- no findings"
-        ctx.repo_host.post_comment(pr, (
-            f"**Review ({verdict['verdict']})** — iteration {iteration + 1}\n\n"
-            f"{verdict.get('reasoning', '')}\n\n{findings}"))
-
-        if verdict["verdict"] == "approve":
+        if verdict.verdict == "approve":
             await ctx.audit("code_reviewer", "approve_review",
                             {"pr": pr, "iterations": iteration + 1})
             print(f"[review] PR #{pr} approved "
                   f"(iteration {iteration + 1})", flush=True)
             return True
 
-        if verdict["verdict"] == "out_of_scope":
+        if verdict.verdict == "out_of_scope":
             await reject(ctx.store, ctx.repo_host,
                          Rejection(pr, "out_of_scope", "author",
-                                   verdict.get("reasoning", "")),
+                                   verdict.reasoning),
                          actor="code_reviewer")
             return False
 
@@ -222,7 +232,8 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
             break
         print(f"[review] PR #{pr} changes requested "
               f"(iteration {iteration + 1}); coder fixing", flush=True)
-        await run_coder(ctx, item, branch, feedback=result.text)
+        await run_coder(ctx, item, branch,
+                        feedback=verdict.model_dump_json(indent=2))
 
     await ctx.audit("code_reviewer", "escalate_to_human", {
         "pr": pr, "rule": f"no approval after {max_iterations} fix iterations"})
@@ -231,27 +242,37 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
     return False
 
 
+async def verify_once(ctx: RunContext, item: dict,
+                      pr: int) -> verify_step.VerifyResult:
+    """One verify pass (single-shot: reused by the Workflow expression).
+    Audits any escalation; writes verified labels into the PR title
+    when the flag policy is satisfied."""
+    diff = ctx.repo_host.get_diff(pr)
+    result = verify_step.verify(diff, item["claimed_risk"], ctx.project,
+                                str(ctx.workspace.dir))
+    if result.escalated:
+        await ctx.audit("verify", "escalate_risk_label", {
+            "pr": pr, "claimed_risk": result.claimed_risk,
+            "verified_risk": result.verified_risk,
+            "reason": result.escalation_reason})
+        print(f"[verify] PR #{pr} risk escalated "
+              f"{result.claimed_risk} -> {result.verified_risk}", flush=True)
+
+    if not result.needs_flag:
+        title = ctx.repo_host.get_pr(pr)["title"]
+        bare = re.sub(r"^(\[[^\]]+\])+\s*", "", title)
+        ctx.repo_host.update_title(pr, f"{result.title_prefix} {bare}")
+    return result
+
+
 async def run_verify(ctx: RunContext, item: dict, pr: int,
                      branch: str) -> verify_step.VerifyResult | None:
     max_flag_fixes = int(
         ctx.project.policy("orchestrator")["max_flag_fix_iterations"])
 
     for attempt in range(max_flag_fixes + 1):
-        diff = ctx.repo_host.get_diff(pr)
-        result = verify_step.verify(diff, item["claimed_risk"], ctx.project,
-                                    str(ctx.workspace.dir))
-        if result.escalated:
-            await ctx.audit("verify", "escalate_risk_label", {
-                "pr": pr, "claimed_risk": result.claimed_risk,
-                "verified_risk": result.verified_risk,
-                "reason": result.escalation_reason})
-            print(f"[verify] PR #{pr} risk escalated "
-                  f"{result.claimed_risk} -> {result.verified_risk}", flush=True)
-
+        result = await verify_once(ctx, item, pr)
         if not result.needs_flag:
-            title = ctx.repo_host.get_pr(pr)["title"]
-            bare = re.sub(r"^(\[[^\]]+\])+\s*", "", title)
-            ctx.repo_host.update_title(pr, f"{result.title_prefix} {bare}")
             return result
 
         if attempt >= max_flag_fixes:
@@ -301,7 +322,11 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     }
     result = await ctx.invoke(approver_spec.build(ctx.project),
                               json.dumps(payload, indent=2))
-    ctx.repo_host.post_comment(pr, result.text)
+    # The approver is tool-less, so its Dossier schema is enforced
+    # natively (output_schema); the orchestrator renders it for humans.
+    dossier = schemas.Dossier.model_validate(extract_json(result.text))
+    approvers = ctx.project.policy("approver")["approvers"]
+    ctx.repo_host.post_comment(pr, schemas.render_dossier(dossier, approvers))
     await ctx.audit("approver", "post_dossier", {"pr": pr})
 
 
@@ -350,19 +375,19 @@ async def run_release_pass(ctx: RunContext) -> None:
     }
     result = await ctx.invoke(rm_spec.build(ctx.project),
                               json.dumps(payload, indent=2))
-    decisions = extract_json(result.text)["decisions"]
+    plan = schemas.ReleasePlan.model_validate(extract_json(result.text))
 
     by_pr = {a.pr: a for a in queue}
-    for decision in decisions:
-        entry = by_pr.get(decision["pr"])
+    for decision in plan.decisions:
+        entry = by_pr.get(decision.pr)
         if entry is None:
             continue
         factors = {"pr": entry.pr, "area": entry.verified.primary_area,
                    "verified_risk": entry.verified.verified_risk,
                    "feature_flagged": entry.verified.flag["covered"],
-                   **decision.get("factors", {}),
-                   "reasoning": decision.get("reasoning", "")}
-        if decision["action"] == "merge":
+                   **decision.factors,
+                   "reasoning": decision.reasoning}
+        if decision.action == "merge":
             ctx.repo_host.merge_pr(entry.pr)
             deploy.promote(f"pr-{entry.pr}")
             await ctx.store.call("record_deploy", pr=entry.pr,
@@ -374,7 +399,7 @@ async def run_release_pass(ctx: RunContext) -> None:
         else:
             await ctx.audit("release_manager", "hold_merge", factors)
             print(f"[release] HELD PR #{entry.pr}: "
-                  f"{decision.get('reasoning', '')}", flush=True)
+                  f"{decision.reasoning}", flush=True)
 
 
 # --- the run -----------------------------------------------------------------
@@ -432,11 +457,14 @@ HANDLERS = {
 }
 
 
-def build_context(project: ProjectConfig) -> RunContext:
+def build_context(project: ProjectConfig,
+                  invoker: AgentInvoker) -> RunContext:
+    """The invoker arrives from the composition root (__main__), which
+    is the only place that chooses a framework (ADR-0007)."""
     return RunContext(
         project=project,
         store=DeliveryStore.for_agents(),
         repo_host=GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"]),
-        invoker=ADKInvoker(),
+        invoker=invoker,
         workspace=Workspace(os.environ["CANDIDATE_APP_DIR"]),
     )

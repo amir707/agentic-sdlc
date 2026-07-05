@@ -18,11 +18,13 @@ def main() -> None:
     load_dotenv(ROOT / ".env")
     load_dotenv(ROOT / "projects-config" / args.project / ".env")
 
+    from adapters.adk.invoker import ADKInvoker
     from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_pipeline
 
+    # Composition root: the ONLY place a framework is chosen (ADR-0007).
     project = load_project(args.project)
-    ctx = build_context(project)
+    ctx = build_context(project, invoker=ADKInvoker())
     asyncio.run(run_pipeline(ctx))
 
 

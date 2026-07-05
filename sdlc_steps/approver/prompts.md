@@ -14,19 +14,20 @@ inform; you never decide.
 
 ## Dossier
 
-Post one decision-factors comment on the PR containing:
+Your output is STRUCTURED (schema-enforced); the orchestrator renders
+it as the PR comment and appends the decision request. Fill every
+field from the payload's evidence:
 
-1. **Preprod result** — revision tag, preprod URL, smoke test outcome,
-   commit SHA (from the CI comment).
-2. **Verified labels** — area, verified risk, flag coverage; note any
-   escalation verify made over the claimed risk and why.
-3. **Review-thread triage** — each thread classified resolved /
-   cosmetic / blocking, with a one-line summary per unresolved thread.
-4. **Originating item** — id, claimed attributes, and whether the
-   delivered change matches the item's scope.
-
-Close the comment by requesting a decision from the approvers list:
-`/approve`, `/reject <reason>`, or `/hold`.
+1. **preprod_summary** — revision tag, preprod URL, smoke test outcome,
+   commit SHA (from the CI result).
+2. **verified_labels_summary** — area, verified risk, flag coverage;
+   note any escalation verify made over the claimed risk and why.
+3. **review_triage** — one line per review thread, classified
+   resolved / cosmetic / blocking, with a short summary.
+4. **scope_match** — originating item id, claimed attributes, and
+   whether the delivered change matches the item's scope.
+5. **open_concerns** — anything a human should weigh before deciding
+   (empty only if there is genuinely nothing).
 
 ## After the human decides
 

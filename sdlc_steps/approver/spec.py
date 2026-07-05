@@ -9,6 +9,7 @@ given on the PR itself (orchestrator/gate.py, ADR-0005).
 from orchestrator.agent_support import gemini_model
 from orchestrator.config import ProjectConfig
 from orchestrator.invoker import AgentSpec
+from orchestrator.schemas import Dossier
 
 
 def build(project: ProjectConfig) -> AgentSpec:
@@ -17,4 +18,7 @@ def build(project: ProjectConfig) -> AgentSpec:
         instruction=project.prompt("approver"),
         model=gemini_model(),
         tools=[],
+        # Tool-less, so the Dossier contract is enforced natively via
+        # output_schema; the orchestrator renders it for the human.
+        output_schema=Dossier,
     )

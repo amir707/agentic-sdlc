@@ -7,11 +7,12 @@ import json
 import httpx
 import pytest
 
-from orchestrator.config import load_project
-from tools.fs_tools import make_workspace_tools
-from orchestrator.invoker import ADKInvoker
-from orchestrator.json_util import extract_json
+from adapters.adk.invoker import _resolve_model
 from adapters.repo_host import GitHubRepoHost, RepoHostError
+from orchestrator.config import load_project
+from orchestrator.invoker import StoreTools
+from orchestrator.json_util import extract_json
+from tools.fs_tools import make_workspace_tools
 
 
 # --- workspace sandbox -------------------------------------------------------
@@ -74,14 +75,14 @@ def test_specs_compose_prompts_and_models(tmp_path, monkeypatch):
     assert names == {"list_files", "read_file", "analyze_diff"}
 
     rm = rm_spec.build(project)
-    # narrow store surface only
+    # narrow store surface only, DECLARED not constructed (ADR-0007)
     assert len(rm.tools) == 1
+    assert isinstance(rm.tools[0], StoreTools)
 
 
 def test_invoker_routes_models():
-    invoker = ADKInvoker()
-    assert invoker._resolve_model("gemini-flash-latest") == "gemini-flash-latest"
-    litellm_model = invoker._resolve_model("anthropic/claude-sonnet-5")
+    assert _resolve_model("gemini-flash-latest") == "gemini-flash-latest"
+    litellm_model = _resolve_model("anthropic/claude-sonnet-5")
     assert type(litellm_model).__name__ == "LiteLlm"
 
 
