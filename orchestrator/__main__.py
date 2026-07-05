@@ -31,6 +31,12 @@ def main() -> None:
     from orchestrator.driver import build_context, run_pipeline
 
     # Composition root: the ONLY place a framework is chosen (ADR-0007).
+    import os
+    print("[orchestrator] models: "
+          f"coder={os.environ.get('CODER_MODEL', 'anthropic/claude-sonnet-5')} | "
+          f"reviewer={os.environ.get('REVIEWER_MODEL') or os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')} | "
+          f"gemini-default={os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}",
+          flush=True)
     project = load_project(args.project)
     ctx = build_context(project, invoker=ADKInvoker())
     try:

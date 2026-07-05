@@ -486,8 +486,17 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         pr = int(raw)
         ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
     else:
-        await run_coder(ctx, item, branch)
-        pr = await open_pr(ctx, item, branch)
+        existing = ctx.repo_host.find_open_pr(branch)
+        if existing:
+            # Resume: an open PR means the coding already happened —
+            # rejoin the pipeline at review instead of re-implementing.
+            pr = existing
+            print(f"[resume] {item['id']}: open PR #{pr} found — "
+                  "skipping coder, resuming at review", flush=True)
+            ctx.workspace.checkout(branch)
+        else:
+            await run_coder(ctx, item, branch)
+            pr = await open_pr(ctx, item, branch)
 
     if not await run_code_reviewer(ctx, item, pr, branch):
         ctx.board.finish(item["id"], "stopped at review")

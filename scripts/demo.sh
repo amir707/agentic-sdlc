@@ -1,85 +1,95 @@
 #!/usr/bin/env bash
-# One-take demo driver. Guides the operator through the 8-beat script,
-# running everything that can be automated and pausing where the story
-# needs a human action (gate decisions on GitHub, chaos toggles).
+# Demo conductor. Runs in ITS OWN terminal alongside the pipeline —
+# it never runs the orchestrator itself (mixing both on one stdin made
+# prompts ambiguous). It owns exactly three things: preflight, the
+# chaos toggles at the right story beats, and the closing receipts.
 #
-# Prerequisites (one-time): docs/setup-runbook.md or scripts/setup.py —
-# baseline deployed, .env files filled, store seeded.
+# Terminal layout for the demo:
+#   A: make mcp          (delivery store)
+#   B: make monitor      (live error rates — the star of beats 5 & 7)
+#   C: make orchestrate  (the pipeline; answer ITS prompts there)
+#   D: make demo         (THIS script: chaos beats + receipts)
+#   E: make watch        (optional: live workers + store view)
 #
-# Terminals: this script assumes the delivery store (make mcp) and the
-# monitor (make monitor) are already running in their own terminals; it
-# checks both and refuses to start otherwise.
-#
-# Beats (see also the Kaggle writeup):
-#  1. seeded backlog -> assessor -> packer refusals (risk budget, split)
-#  2. coder PRs; reviewer (different model family) fix loop
-#  3. verify escalates PAY-102, flag invariant returns it to the coder
-#  4. CI: tagged Cloud Run revisions + live smoke tests
-#  5. chaos ON -> monitor opens a payments incident (watch its terminal)
-#  6. release pass: catalog merges, payments PR held citing the incident
-#  7. chaos OFF -> resolver closes after recovery -> held PR merges
-#  8. "The Build" beat: toolchain (recorded separately over the repo)
+# Every prompt below says what Enter does HERE and what you do in the
+# OTHER terminals. Nothing here reads orchestrator state; the live
+# service is the only medium between chaos and the monitor.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PYTHON=.venv/bin/python
-PARALLEL="${DEMO_PARALLEL:-1}"
 
-# --- env ---------------------------------------------------------------------
 set -a
 source .env
 source projects-config/candidate-app/.env
 set +a
 
 LIVE_URL="$($PYTHON -m adapters.deploy url)"
-STORE_URL="http://127.0.0.1:${DELIVERY_STORE_PORT:-8787}/mcp"
-
-pause() { echo; read -r -p ">>> $1  [Enter to continue] "; }
 
 chaos() {  # chaos on|off
-    local flag=false; [ "$1" = "on" ] && flag=true
-    curl -s -X POST "$LIVE_URL/config/chaos" \
+    local flag=false state=OFF
+    if [ "$1" = "on" ]; then flag=true; state=ON; fi
+    local resp
+    resp=$(curl -s -X POST "$LIVE_URL/config/chaos" \
         -H "X-Config-Token: $CONFIG_TOKEN" \
         -H "Content-Type: application/json" \
-        -d "{\"payments\": $flag}"
-    echo " <- chaos payments=$flag"
+        -d "{\"payments\": $flag}")
+    echo "chaos for payments is now $state (service confirmed: $resp)"
+}
+
+pause() {
+    echo
+    echo "$1"
+    read -r -p "    [Enter] = $2 "
 }
 
 # --- preflight ----------------------------------------------------------------
 echo "== preflight =="
-curl -sf "$LIVE_URL/health" >/dev/null || { echo "candidate-app not healthy at $LIVE_URL"; exit 1; }
-curl -s -o /dev/null -w "" "$STORE_URL" || { echo "delivery store not running (make mcp)"; exit 1; }
+curl -sf "$LIVE_URL/health" >/dev/null \
+    || { echo "candidate-app not healthy at $LIVE_URL"; exit 1; }
+curl -s -o /dev/null "http://127.0.0.1:${DELIVERY_STORE_PORT:-8787}/mcp" \
+    || { echo "delivery store not running -> start 'make mcp' first"; exit 1; }
 echo "live URL: $LIVE_URL"
-echo "reminder: monitor should be probing in its own terminal (make monitor)"
-chaos off  # known-good starting state
-
-pause "Beat 1-4: full pipeline (assess, pack, code, review, verify, CI, gate).
-    Decide each gate on the PR as prompted. Chaos beats come after."
-
-# --- the pipeline (beats 1-4 + gates) -----------------------------------------
-$PYTHON -m orchestrator --project candidate-app --parallel "$PARALLEL" &
-ORCH_PID=$!
-
-# Beat 5/7 guidance runs alongside the orchestrator's release phase:
-pause "Beat 5: when all PRs are approved and BEFORE answering the
-    release-pass prompt, flip chaos ON and watch the monitor open a
-    payments incident (about one window)."
-chaos on
-
-pause "Beat 6: now let the release pass run (answer its prompt in the
-    orchestrator terminal). Expect: catalog merges, payments HELD citing
-    the incident. Then continue here."
-
-pause "Beat 7: flip chaos OFF; wait ~2 healthy windows; run another
-    release pass when prompted — the held PR merges."
 chaos off
+echo "known-good start: chaos OFF, service healthy"
 
-if ! wait $ORCH_PID; then
-    echo "[demo] orchestrator exited with a failure — receipts below show how far it got (rerun resumes)"
-fi
+pause "BEATS 1-4 happen in the ORCHESTRATOR terminal:
+    start 'make orchestrate' there now (if not already running).
+    It will assess, pack, code, review, verify, run CI, and pause at
+    each gate — decide those with /approve comments on the GitHub PRs.
+    Come back HERE when the orchestrator asks:
+    'held PRs remain; run another release pass?' — do NOT answer it yet.
+    (If all PRs merged with no holds, you can still continue for the
+    incident beats — the next release pass will just be empty.)" \
+    "confirm the orchestrator is waiting at its release-pass prompt"
 
-# --- the receipts ---------------------------------------------------------------
+# --- beat 5: incident opens -----------------------------------------------------
+echo
+echo "BEAT 5: flipping chaos ON now — watch the MONITOR terminal:"
+echo "        payments error_rate climbs, then 'incident #N open'."
+chaos on
+pause "Wait for the monitor to print the incident (one ~15s window)." \
+    "confirm the incident is open"
+
+# --- beat 6: hold ----------------------------------------------------------------
+pause "BEAT 6 happens in the ORCHESTRATOR terminal:
+    answer 'Y' to its release-pass prompt NOW. Expect: catalog PR
+    MERGES (traffic shifts), payments PR HELD citing the incident.
+    Come back HERE when it asks about another pass." \
+    "confirm the hold happened (audited with factors)"
+
+# --- beat 7: recovery + merge -----------------------------------------------------
+echo
+echo "BEAT 7: flipping chaos OFF now — watch the MONITOR terminal:"
+echo "        two consecutive healthy windows (~30s) let the resolver close it."
+chaos off
+pause "After ~2 healthy windows, answer 'Y' to the orchestrator's
+    release-pass prompt again: the resolver closes the incident and the
+    held payments PR MERGES. When the orchestrator exits, come back." \
+    "show the receipts (verify_demo + audit tail)"
+
+# --- receipts ---------------------------------------------------------------------
 echo
 echo "== verify_demo: asserting the audit trail =="
 $PYTHON scripts/verify_demo.py || true

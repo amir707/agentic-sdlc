@@ -26,6 +26,15 @@ def _elapsed(seconds: float) -> str:
         if seconds >= 60 else f"{seconds:.0f}s"
 
 
+def _local(ts: str | None) -> str:
+    """Store timestamps are UTC ISO; render in the machine's timezone."""
+    if not ts:
+        return "-"
+    from datetime import datetime
+    local = datetime.fromisoformat(ts).astimezone()
+    return local.strftime("%H:%M:%S %Z")
+
+
 def _render_activity() -> None:
     """Live 'who is doing what, since when' from the activity board."""
     import time
@@ -90,14 +99,27 @@ def main() -> None:
 
     section("incidents")
     for i in conn.execute("SELECT * FROM incidents ORDER BY id"):
+        resolved = f" resolved={_local(i['resolved_at'])}" \
+            if i["resolved_at"] else ""
         print(f"  #{i['id']} {i['area']:<9} {i['status']:<9} "
-              f"error_rate={i['error_rate']} opened={i['opened_at']}")
+              f"error_rate={i['error_rate']} "
+              f"opened={_local(i['opened_at'])}{resolved}")
     section("deploys")
     for d in conn.execute("SELECT * FROM deploys ORDER BY id"):
         print(f"  pr#{d['pr']} {d['revision']:<10} traffic={d['traffic']:<8} "
-              f"{d['ts']}")
+              f"{_local(d['ts'])}")
 
-    section("token usage (capacity spent)")
+    sprint_id = sprint["id"] if sprint else None
+    section(f"token usage since sprint #{sprint_id} (current run)"
+            if sprint_id else "token usage (current run)")
+    current = db.summarize_token_usage(conn, sprint_id)
+    for u in current:
+        print(f"  {u['agent']:<16} {u['model']:<28} "
+              f"in={u['input_tokens']} out={u['output_tokens']} "
+              f"calls={u['calls']}")
+    if not current:
+        print("  none yet")
+    section("token usage (all-time, across every run)")
     for u in db.summarize_token_usage(conn):
         print(f"  {u['agent']:<16} {u['model']:<28} "
               f"in={u['input_tokens']} out={u['output_tokens']} "
