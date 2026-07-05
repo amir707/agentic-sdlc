@@ -189,30 +189,30 @@ def main() -> None:
 
     history = read_recent_history(limit=10)
     if history:
-        section("recently completed steps")
-        for h in history:
+        section("recently completed steps (newest first)")
+        for h in reversed(history):
             print(f"  {_local(h['ended']):<13} {h['item']:<9} "
                   f"{h['step']:<16} {_elapsed(h['seconds']):>7}  "
                   f"-> {h['outcome']}")
 
-    section("resolved incidents")
+    section("resolved incidents (newest first)")
     resolved = conn.execute(
-        "SELECT * FROM incidents WHERE status='resolved' ORDER BY id").fetchall()
+        "SELECT * FROM incidents WHERE status='resolved' ORDER BY id DESC").fetchall()
     for i in resolved:
         print(f"  #{i['id']} {i['area']:<9} opened={_local(i['opened_at'])} "
               f"resolved={_local(i['resolved_at'])}")
     if not resolved:
         print("  none")
 
-    section("deploys")
+    section("deploys (newest first)")
     pr_to_item = {pr: item for item, pr in pr_map.items()}
-    for d in conn.execute("SELECT * FROM deploys ORDER BY id"):
+    for d in conn.execute("SELECT * FROM deploys ORDER BY id DESC"):
         item = pr_to_item.get(d["pr"], "?")
         print(f"  {_local(d['ts']):<13} {item:<9} PR #{d['pr']:<4} "
               f"{d['revision']:<10} traffic={d['traffic']}")
 
-    section("audit tail (last 12)")
-    for e in audit[-12:]:
+    section("audit tail (last 12, newest first)")
+    for e in reversed(audit[-12:]):
         ref = f"PR#{_pr_of(e)}" if _pr_of(e) else \
             e["factors"].get("item", "")
         print(f"  {_local(e['ts']):<13} #{e['id']:>3} {e['actor']:<16} "
