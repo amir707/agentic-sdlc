@@ -233,7 +233,10 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
     PR comment and returns it schema-validated."""
     ctx.board.begin(item["id"], "code_reviewer",
                     f"PR #{pr} round {iteration + 1}")
-    diff = ctx.repo_host.get_diff(pr)
+    # Diff from the LOCAL workspace, not GitHub: right after a push the
+    # PR-diff endpoint can lag by seconds, and judging a stale diff once
+    # made verify reject a fix that was already correct.
+    diff = ctx.workspace.diff_against()
     closure = blast_radius(ctx.workspace.dir, files_touched(diff))
     payload = {
         "task": ("Review this PR. Reply ONLY with JSON: "
@@ -311,7 +314,9 @@ async def verify_once(ctx: RunContext, item: dict,
     Audits any escalation; writes verified labels into the PR title
     when the flag policy is satisfied."""
     ctx.board.begin(item["id"], "verify", f"PR #{pr} claimed-vs-actual")
-    diff = ctx.repo_host.get_diff(pr)
+    # Local diff for the same reason as review_once: GitHub's PR diff is
+    # eventually consistent after a push; the workspace is the truth.
+    diff = ctx.workspace.diff_against()
     result = verify_step.verify(diff, item["claimed_risk"], ctx.project,
                                 str(ctx.workspace.dir))
     if result.escalated:
