@@ -210,6 +210,9 @@ async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
     # Title carries the item id; verify later prepends the verified
     # labels: "[area:payments][risk:high][flag:yes] PAY-101: <title>".
     pr = ctx.repo_host.open_pr(branch, f"{item['id']}: {item['title']}", body)
+    # The item<->PR mapping lives in the audit trail (status views use it).
+    await ctx.audit("coder", "open_pr",
+                    {"item": item["id"], "pr": pr, "branch": branch})
     print(f"[coder] PR #{pr} opened for {item['id']}", flush=True)
     return pr
 
@@ -549,6 +552,8 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         raw = input(f"[human item] {item['id']} is human-implemented; "
                     "enter PR number when raised: ").strip()
         pr = int(raw)
+        await ctx.audit("orchestrator", "human_pr",
+                        {"item": item["id"], "pr": pr})
         ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
     else:
         prior = ctx.repo_host.find_pr(branch, state="all")
@@ -565,6 +570,8 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
             pr = prior["number"]
             print(f"[resume] {item['id']}: open PR #{pr} found — "
                   "skipping coder, resuming at review", flush=True)
+            await ctx.audit("orchestrator", "resume_pr",
+                            {"item": item["id"], "pr": pr})
             ctx.workspace.checkout(branch)
         else:
             await run_coder(ctx, item, branch)
@@ -602,8 +609,18 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     # also runs before every release pass).
     await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
 
-    assessments = await run_risk_assessor(ctx)
-    selected = await run_sprint_packer(ctx, assessments)
+    # ONE store lifetime = ONE sprint: if a sprint exists, resume it
+    # (assessments and packing already happened); `make seed` is the
+    # explicit way to start a new sprint.
+    sprint = await ctx.store.call("get_current_sprint")
+    if sprint:
+        print(f"[pack] resuming sprint #{sprint['id']}: "
+              f"{sprint['item_ids']}", flush=True)
+        backlog = {i["id"]: i for i in await ctx.store.call("list_backlog")}
+        selected = [backlog[i] for i in sprint["item_ids"] if i in backlog]
+    else:
+        assessments = await run_risk_assessor(ctx)
+        selected = await run_sprint_packer(ctx, assessments)
 
     if parallel > 1:
         # Agent items fan out, each in its own git worktree (a checkout

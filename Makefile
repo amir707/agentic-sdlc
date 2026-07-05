@@ -32,7 +32,11 @@ status:
 
 # live store view: refreshes every 5s (4th terminal during demos)
 watch:
-	while true; do clear; $(PYTHON) scripts/store_status.py; sleep 5; done
+	@while true; do \
+	  out=$$($(PYTHON) scripts/store_status.py 2>&1); \
+	  printf '\033[H\033[2J\033[3J'; printf '%s\n' "$$out"; \
+	  sleep 5; \
+	done
 
 verify-demo:
 	$(PYTHON) scripts/verify_demo.py
