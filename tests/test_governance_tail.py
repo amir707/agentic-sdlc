@@ -135,3 +135,26 @@ def test_resolver_resolves_after_sustained_recovery():
 def test_resolver_needs_enough_samples():
     samples = {"payments": [{"error_rate": 0.0}]}
     assert decide([_incident()], samples, _POLICY) == []
+
+
+def test_verified_label_trusts_assessed_over_claim(tmp_path):
+    """An overstated PM claim (high) on a small catalog change labels at
+    the governor's own assessed risk (medium) — claims can overstate as
+    well as understate; assessed + actual outrank them."""
+    project = load_project("candidate-app")
+    result = verify(CATALOG_DIFF, "high", project, _payments_repo(tmp_path),
+                    assessed_risk="medium")
+    assert result.verified_risk == "medium"
+    assert not result.escalated          # the claim did not UNDERstate
+
+
+def test_trap_escalates_even_when_assessor_saw_it_coming(tmp_path):
+    """PAY-102 drift-proofing: even if the assessor rates the trap item
+    medium, the escalation still fires because the CLAIM said low —
+    claimed-vs-actual is the story, independent of assessor judgment."""
+    project = load_project("candidate-app")
+    result = verify(UNFLAGGED_PAYMENTS_DIFF, "low", project,
+                    _payments_repo(tmp_path), assessed_risk="medium")
+    assert result.verified_risk == "medium"
+    assert result.escalated              # claimed low < verified medium
+    assert result.needs_flag

@@ -317,20 +317,26 @@ async def verify_once(ctx: RunContext, item: dict,
     # Local diff for the same reason as review_once: GitHub's PR diff is
     # eventually consistent after a push; the workspace is the truth.
     diff = ctx.workspace.diff_against()
+    assessments = {a["item_id"]: a
+                   for a in await ctx.store.call("list_assessments")}
+    assessed = assessments.get(item["id"], {}).get("risk")
     result = verify_step.verify(diff, item["claimed_risk"], ctx.project,
-                                str(ctx.workspace.dir))
+                                str(ctx.workspace.dir),
+                                assessed_risk=assessed)
     if result.escalated:
         await ctx.audit("verify", "escalate_risk_label", {
             "pr": pr, "claimed_risk": result.claimed_risk,
+            "assessed_risk": assessed,
             "verified_risk": result.verified_risk,
             "reason": result.escalation_reason})
         print(f"[verify] PR #{pr} risk escalated "
               f"{result.claimed_risk} -> {result.verified_risk}", flush=True)
 
     if not result.needs_flag:
-        title = ctx.repo_host.get_pr(pr)["title"]
-        bare = re.sub(r"^(\[[^\]]+\])+\s*", "", title)
-        ctx.repo_host.update_title(pr, f"{result.title_prefix} {bare}")
+        # Title: <ITEM-ID>: [area:..][risk:..][flag:..] <item title>
+        # (rebuilt from scratch — no parsing of whatever is there now).
+        ctx.repo_host.update_title(
+            pr, f"{item['id']}: {result.title_prefix} {item['title']}")
     return result
 
 

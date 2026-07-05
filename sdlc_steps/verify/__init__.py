@@ -47,7 +47,11 @@ def _module_to_path(module: str) -> str:
 
 
 def verify(diff_text: str, claimed_risk: str, project,
-           checkout_dir: str) -> VerifyResult:
+           checkout_dir: str, assessed_risk: str | None = None) -> VerifyResult:
+    """assessed_risk is the governor's own pre-code judgment (falls back
+    to the claim when absent). The verified label trusts assessed over
+    claimed; the ESCALATION comparison stays claimed-vs-actual, because
+    catching an understated claim is this step's reason to exist."""
     files = files_touched(diff_text)
     radius = blast_radius(checkout_dir, files)
     radius_paths = {_module_to_path(m) for m in radius}
@@ -68,8 +72,13 @@ def verify(diff_text: str, claimed_risk: str, project,
         reason = (reason + "; " if reason else "") + \
             f"wide blast radius ({len(radius)} modules)"
 
-    escalated = _RISK_ORDER[floor] > _RISK_ORDER[claimed_risk]
-    verified = floor if escalated else claimed_risk
+    baseline = assessed_risk or claimed_risk
+    # The label reflects the governor's judgment raised to actual impact
+    # — never the PM's claim alone (a claim can overstate as well as
+    # understate; the assessor + the diff outrank it).
+    verified = floor if _RISK_ORDER[floor] > _RISK_ORDER[baseline] else baseline
+    # Escalation = the CLAIM understated reality (the headline guardrail).
+    escalated = _RISK_ORDER[verified] > _RISK_ORDER[claimed_risk]
 
     flag = flag_coverage(diff_text)
     threshold = project.policy("verify")["flag_required_min_risk"]
