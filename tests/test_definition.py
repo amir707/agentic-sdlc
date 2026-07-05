@@ -141,3 +141,23 @@ def test_error_summaries_are_one_actionable_line():
 
     unknown = Exception("something odd\nwith many lines\nof detail")
     assert one_line(unknown) == "Exception: something odd"
+
+
+def test_stage_markers_key_on_head_sha():
+    """Bot comments carry invisible idempotency markers keyed to the
+    head SHA: a restart skips completed stages; a new commit repeats
+    them (the SHA changed)."""
+    from orchestrator.driver import _find_marker, _marker
+
+    sha_a, sha_b = "abc123", "def456"
+    comments = [
+        {"body": "dossier text\n\n" + _marker("dossier", sha_a)},
+        {"body": f"**Review (approve)**\n\n{_marker('review', sha_a, 'approve')}"},
+    ]
+    assert _find_marker(comments, _marker("dossier", sha_a)) == 0
+    assert _find_marker(comments, _marker("review", sha_a, "approve")) == 1
+    # a new commit invalidates everything
+    assert _find_marker(comments, _marker("dossier", sha_b)) is None
+    assert _find_marker(comments, _marker("review", sha_b, "approve")) is None
+    # markers are invisible to humans (HTML comments)
+    assert _marker("ci", sha_a, "passed").startswith("<!--")

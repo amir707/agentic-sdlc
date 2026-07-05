@@ -15,8 +15,10 @@ definition names the rule, never the number.
 Three phases:
 - planning:  once per sprint (assess everything, pack under budgets)
 - per_item:  once per selected backlog item, in priority order
-- release:   once over the approved queue (and re-runnable: held PRs
-             stay queued until a later pass merges them)
+- release:   immediately after EVERY gate approval (trickle), one PR
+             and one deployment at a time, each decision seeing the
+             previous deploy; held PRs stay queued and are reconsidered
+             on every pass, plus a final end-of-sprint pass
 """
 
 from dataclasses import dataclass

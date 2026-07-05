@@ -56,15 +56,15 @@ echo "known-good start: chaos OFF, service healthy"
 
 pause "BEATS 1-4 happen in the ORCHESTRATOR terminal:
     start 'make orchestrate' there now (if not already running).
-    It will assess, pack, code, review, verify, run CI, and pause at
-    each gate — decide those with /approve comments on the GitHub PRs.
-    Come back HERE when the orchestrator asks:
-    'held PRs remain; run another release pass?' — do NOT answer it yet.
-    (If all PRs merged with no holds, you can still continue for the
-    incident beats — the next release pass will just be empty.)" \
-    "confirm the orchestrator is waiting at its release-pass prompt"
+    Per item it codes, reviews, verifies, runs CI, then pauses at the
+    gate for your /approve comment on the GitHub PR. RELEASE IS
+    IMMEDIATE: each approval triggers a release decision on the spot,
+    one PR at a time.
+    THE ONE RULE: the FIRST dossier will be the PAYMENTS PR (PAY-101).
+    Do NOT /approve it yet — come back HERE first." \
+    "confirm the payments dossier is posted and NOT yet approved"
 
-# --- beat 5: incident opens -----------------------------------------------------
+# --- beat 5: incident opens ------------------------------------------------------
 echo
 echo "BEAT 5: flipping chaos ON now — watch the MONITOR terminal:"
 echo "        payments error_rate climbs, then 'incident #N open'."
@@ -72,21 +72,26 @@ chaos on
 pause "Wait for the monitor to print the incident (one ~15s window)." \
     "confirm the incident is open"
 
-# --- beat 6: hold ----------------------------------------------------------------
-pause "BEAT 6 happens in the ORCHESTRATOR terminal:
-    answer 'Y' to its release-pass prompt NOW. Expect: catalog PR
-    MERGES (traffic shifts), payments PR HELD citing the incident.
-    Come back HERE when it asks about another pass." \
-    "confirm the hold happened (audited with factors)"
+# --- beat 6: hold + contrast -------------------------------------------------------
+pause "BEAT 6: now /approve the PAYMENTS PR on GitHub. Watch the
+    ORCHESTRATOR: its immediate release decision HOLDS that PR, citing
+    the open incident (audited with factors). Then keep approving the
+    other PRs as their dossiers arrive — each gets its own decision,
+    and the catalog PRs MERGE one by one DURING the incident
+    (different area: the contrast is the point). Raise + enter the
+    human PR when prompted. Come back HERE when the orchestrator asks:
+    'held PRs remain; run another release pass?'" \
+    "confirm the hold happened and the sprint items are done"
 
-# --- beat 7: recovery + merge -----------------------------------------------------
+# --- beat 7: recovery + merge -------------------------------------------------------
 echo
 echo "BEAT 7: flipping chaos OFF now — watch the MONITOR terminal:"
 echo "        two consecutive healthy windows (~30s) let the resolver close it."
 chaos off
 pause "After ~2 healthy windows, answer 'Y' to the orchestrator's
-    release-pass prompt again: the resolver closes the incident and the
-    held payments PR MERGES. When the orchestrator exits, come back." \
+    release-pass prompt: the resolver closes the incident and the held
+    payments PR MERGES (traffic shifts). When the orchestrator exits,
+    come back." \
     "show the receipts (verify_demo + audit tail)"
 
 # --- receipts ---------------------------------------------------------------------

@@ -64,6 +64,9 @@ class RunContext:
     ci_lock: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
     # Live "who is doing what, since when" (rendered by make watch).
     board: ActivityBoard = field(default_factory=ActivityBoard)
+    # Release passes are serialized: with --parallel, two gate approvals
+    # must not run two release managers over the same queue at once.
+    release_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     async def invoke(self, spec, message: str) -> Invocation:
         """Every invocation is metered: token spend is sprint capacity."""
@@ -77,6 +80,21 @@ class RunContext:
     async def audit(self, actor: str, decision: str, factors: dict) -> None:
         await self.store.call("append_audit", actor=actor,
                               decision=decision, factors=factors)
+
+
+def _marker(kind: str, sha: str, extra: str = "") -> str:
+    """Idempotency stamp for bot comments (invisible in the GitHub UI).
+    Keyed to the head SHA: a new commit naturally invalidates it, so a
+    restarted run repeats a stage only when the code actually changed."""
+    suffix = f":{extra}" if extra else ""
+    return f"<!-- agentic-sdlc:{kind}:{sha}{suffix} -->"
+
+
+def _find_marker(comments: list[dict], marker: str) -> int | None:
+    for index, comment in enumerate(comments):
+        if marker in comment["body"]:
+            return index
+    return None
 
 
 def _slug(title: str) -> str:
@@ -230,14 +248,24 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
     findings = "\n".join(
         f"- {'🔴 blocking' if c.blocking else '⚪ cosmetic'}: {c.body}"
         for c in verdict.comments) or "- no findings"
+    sha = ctx.repo_host.get_pr(pr)["head_sha"]
     ctx.repo_host.post_comment(pr, (
         f"**Review ({verdict.verdict})** — iteration {iteration + 1}\n\n"
-        f"{verdict.reasoning}\n\n{findings}"))
+        f"{verdict.reasoning}\n\n{findings}\n\n"
+        f"{_marker('review', sha, verdict.verdict)}"))
     return verdict
 
 
 async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
                             branch: str) -> bool:
+    # Resume idempotency: this head commit may already carry an approval.
+    sha = ctx.repo_host.get_pr(pr)["head_sha"]
+    comments = ctx.repo_host.get_review_threads(pr)
+    if _find_marker(comments, _marker("review", sha, "approve")) is not None:
+        print(f"[resume] PR #{pr}: review already approved {sha[:7]} — "
+              "skipping", flush=True)
+        return True
+
     max_iterations = int(
         ctx.project.policy("orchestrator")["max_fix_iterations"])
 
@@ -326,11 +354,21 @@ async def run_verify(ctx: RunContext, item: dict, pr: int,
 
 async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
                          verified) -> bool:
+    # Resume idempotency: this head commit may already be deployed+smoked.
+    sha = ctx.repo_host.get_pr(pr)["head_sha"]
+    comments = ctx.repo_host.get_review_threads(pr)
+    if _find_marker(comments, _marker("ci", sha, "passed")) is not None:
+        print(f"[resume] PR #{pr}: preprod already passed for {sha[:7]} — "
+              "skipping", flush=True)
+        return True
+
     ctx.board.begin(item["id"], "preprod_ci",
                     f"PR #{pr} build + tagged revision + smoke")
     ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir), verified.areas,
                                 ctx.project)
-    ctx.repo_host.post_comment(pr, preprod_ci.format_comment(ci))
+    ctx.repo_host.post_comment(pr, (
+        preprod_ci.format_comment(ci) + "\n\n"
+        + _marker("ci", sha, "passed" if ci.passed else "failed")))
     if ci.preprod_url:
         await ctx.store.call("record_deploy", pr=pr,
                              revision=ci.revision_tag, traffic="preprod")
@@ -344,6 +382,17 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
 
 async def run_approver(ctx: RunContext, item: dict, pr: int,
                        verified) -> int:
+    # Resume idempotency: if this head commit already has its dossier,
+    # reuse it — and the gate baseline starts right after it, so a
+    # decision the human made before the restart is still honored.
+    sha = ctx.repo_host.get_pr(pr)["head_sha"]
+    comments = ctx.repo_host.get_review_threads(pr)
+    existing = _find_marker(comments, _marker("dossier", sha))
+    if existing is not None:
+        print(f"[resume] PR #{pr}: dossier already posted for {sha[:7]} — "
+              "reusing", flush=True)
+        return existing + 1
+
     ctx.board.begin(item["id"], "approver", f"PR #{pr} assembling dossier")
     payload = {
         "task": "Assemble the decision dossier for this PR as one comment.",
@@ -360,7 +409,9 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     # natively (output_schema); the orchestrator renders it for humans.
     dossier = schemas.Dossier.model_validate(extract_json(result.text))
     approvers = ctx.project.policy("approver")["approvers"]
-    ctx.repo_host.post_comment(pr, schemas.render_dossier(dossier, approvers))
+    ctx.repo_host.post_comment(pr, (
+        schemas.render_dossier(dossier, approvers)
+        + "\n\n" + _marker("dossier", sha)))
     await ctx.audit("approver", "post_dossier", {"pr": pr})
     # The gate baseline is captured HERE, at dossier-post time: a human
     # who decides on GitHub before the gate first looks must be seen.
@@ -415,6 +466,11 @@ async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
 # --- release phase -----------------------------------------------------------
 
 async def run_release_pass(ctx: RunContext) -> None:
+    async with ctx.release_lock:
+        await _release_pass_locked(ctx)
+
+
+async def _release_pass_locked(ctx: RunContext) -> None:
     ctx.board.begin("RELEASE", "incident_resolver", "checking recovery")
     await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
     queue = [a for a in ctx.approved if not a.merged]
@@ -422,33 +478,40 @@ async def run_release_pass(ctx: RunContext) -> None:
         ctx.board.finish("RELEASE", "queue empty")
         print("[release] queue empty", flush=True)
         return
-    ctx.board.begin("RELEASE", "release_manager",
-                    f"deciding {[a.pr for a in queue]}")
+    # One PR, one decision, one deployment at a time — strictly in a
+    # row. Each merge records its deploy BEFORE the next decision, so
+    # the release manager sees it as a fresh same-area deploy and can
+    # postpone stacking per its judgment rules (confidence window).
+    confidence = ctx.project.policy(
+        "release_manager")["deploy_confidence_minutes"]
+    for entry in queue:
+        ctx.board.begin("RELEASE", "release_manager",
+                        f"deciding PR #{entry.pr}")
+        payload = {
+            "task": ("Decide merge or hold for THIS ONE PR, right now. "
+                     "Consult the store (open incidents, recent deploys, "
+                     "health samples) and weigh your judgment rules — "
+                     "especially: never merge into an area with an open "
+                     "incident, and postpone when a recent deploy in the "
+                     "same area or with an overlapping closure has not yet "
+                     "shown healthy signal within the confidence window. "
+                     'Reply ONLY with JSON: {"pr": ' + str(entry.pr) +
+                     ', "action": "merge|hold", "reasoning": "...", '
+                     '"factors": {}}'),
+            "pr": {
+                "pr": entry.pr, "item": entry.item["id"],
+                "area": entry.verified.primary_area,
+                "verified_risk": entry.verified.verified_risk,
+                "feature_flagged": entry.verified.flag["covered"],
+                "dependency_closure": sorted(entry.verified.radius),
+            },
+            "deploy_confidence_minutes": confidence,
+        }
+        result = await ctx.invoke(rm_spec.build(ctx.project),
+                                  json.dumps(payload, indent=2))
+        decision = schemas.ReleaseDecision.model_validate(
+            extract_json(result.text))
 
-    payload = {
-        "task": ("Decide merge/hold and ordering for the approved queue. "
-                 "Consult the store for incidents, deploys and health. Reply "
-                 'ONLY with JSON: {"decisions": [{"pr": 1, '
-                 '"action": "merge|hold", "reasoning": "...", '
-                 '"factors": {}}]} in your chosen order.'),
-        "queue": [{
-            "pr": a.pr, "item": a.item["id"], "area": a.verified.primary_area,
-            "verified_risk": a.verified.verified_risk,
-            "feature_flagged": a.verified.flag["covered"],
-            "dependency_closure": sorted(a.verified.radius),
-        } for a in queue],
-        "deploy_confidence_minutes":
-            ctx.project.policy("release_manager")["deploy_confidence_minutes"],
-    }
-    result = await ctx.invoke(rm_spec.build(ctx.project),
-                              json.dumps(payload, indent=2))
-    plan = schemas.ReleasePlan.model_validate(extract_json(result.text))
-
-    by_pr = {a.pr: a for a in queue}
-    for decision in plan.decisions:
-        entry = by_pr.get(decision.pr)
-        if entry is None:
-            continue
         factors = {"pr": entry.pr, "area": entry.verified.primary_area,
                    "verified_risk": entry.verified.verified_risk,
                    "feature_flagged": entry.verified.flag["covered"],
@@ -515,7 +578,13 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         ctx.board.finish(item["id"], "rejected at gate")
         return None
     ctx.board.finish(item["id"], "queued for release")
-    return ApprovedPR(pr=pr, item=item, verified=verified)
+    approved = ApprovedPR(pr=pr, item=item, verified=verified)
+    ctx.approved.append(approved)
+    # Trickle release: an approval immediately gets a release decision —
+    # the pass covers the WHOLE unmerged queue, so earlier holds are
+    # reconsidered under the current situation too.
+    await run_release_pass(ctx)
+    return approved
 
 
 async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
@@ -544,15 +613,16 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
 
         print(f"[pipeline] running {len(agent_items)} agent items with "
               f"up to {parallel} concurrent coders", flush=True)
-        results = list(await asyncio.gather(*(worker(i) for i in agent_items)))
+        await asyncio.gather(*(worker(i) for i in agent_items))
         for item in human_items:
-            results.append(await process_item(ctx, item))
+            await process_item(ctx, item)
         factory.cleanup()
     else:
-        results = [await process_item(ctx, item) for item in selected]
+        for item in selected:
+            await process_item(ctx, item)
 
-    ctx.approved.extend(r for r in results if r)
-
+    # Trickle passes already ran per approval; this final pass gives any
+    # remaining holds one more look now that the sprint is complete.
     await run_release_pass(ctx)
     while any(not a.merged for a in ctx.approved):
         answer = input("\n[release] held PRs remain; run another release "
