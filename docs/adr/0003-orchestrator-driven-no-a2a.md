@@ -36,3 +36,16 @@ The whole run is sequential and inspectable; every hand-off is visible
 as an artifact (a PR event or a store record). The scaling path (README)
 names the successors — webhook dispatch, work queues — as orchestrator swaps
 that leave agents and the MCP surface untouched.
+
+## Amendment (parallel coders)
+
+`python -m orchestrator --parallel N` fans agent-implemented items out
+to up to N concurrent coders, each in its own git worktree
+(`WorkspaceFactory` — a checkout is a cache of GitHub state, so nothing
+needs to share one), with preprod CI serialized behind a lock (one
+Cloud Run service = one revision stream) and human-implemented items
+kept sequential (they block on terminal input). Coordination is STILL
+orchestrator-driven and artifact-mediated — nothing about the no-A2A
+decision changes; only the driver's loop shape does. Sequential remains
+the default for trace readability, and it mirrors the cloud topology,
+where every queue worker materializes its own ephemeral checkout.

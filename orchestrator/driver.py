@@ -18,7 +18,7 @@ import json
 import os
 import re
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from orchestrator.config import ProjectConfig
@@ -31,7 +31,7 @@ from orchestrator import schemas
 from orchestrator.rejection import Rejection, reject
 from adapters.repo_host import GitHubRepoHost
 from adapters.store_client import DeliveryStore
-from orchestrator.workspace import Workspace
+from orchestrator.workspace import Workspace, WorkspaceFactory
 from adapters import deploy
 from sdlc_steps import incident_resolver, preprod_ci, sprint_packer, verify as verify_step
 from sdlc_steps.approver import spec as approver_spec
@@ -57,6 +57,10 @@ class RunContext:
     invoker: AgentInvoker
     workspace: Workspace
     approved: list[ApprovedPR] = field(default_factory=list)
+    # Concurrent preprod deploys against ONE Cloud Run service would
+    # fight over revision creation; CI is the one per-item stage that
+    # must queue even when coders run in parallel.
+    ci_lock: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
 
     async def invoke(self, spec, message: str) -> Invocation:
         """Every invocation is metered: token spend is sprint capacity."""
@@ -404,34 +408,65 @@ async def run_release_pass(ctx: RunContext) -> None:
 
 # --- the run -----------------------------------------------------------------
 
-async def run_pipeline(ctx: RunContext) -> None:
+async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
+    """One item's full journey (self-contained: parallel workers run
+    this concurrently, each with its own workspace)."""
+    branch = _branch(item)
+    print(f"\n=== {item['id']}: {item['title']} ===", flush=True)
+
+    if item["implementation"] == "human":
+        raw = input(f"[human item] {item['id']} is human-implemented; "
+                    "enter PR number when raised: ").strip()
+        pr = int(raw)
+        ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
+    else:
+        await run_coder(ctx, item, branch)
+        pr = await open_pr(ctx, item, branch)
+
+    if not await run_code_reviewer(ctx, item, pr, branch):
+        return None
+    verified = await run_verify(ctx, item, pr, branch)
+    if verified is None:
+        return None
+    async with ctx.ci_lock:
+        ci_ok = await run_preprod_ci(ctx, item, pr, verified)
+    if not ci_ok:
+        return None
+    await run_approver(ctx, item, pr, verified)
+    if not await run_approval_gate(ctx, item, pr):
+        return None
+    return ApprovedPR(pr=pr, item=item, verified=verified)
+
+
+async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     assessments = await run_risk_assessor(ctx)
     selected = await run_sprint_packer(ctx, assessments)
 
-    for item in selected:
-        branch = _branch(item)
-        print(f"\n=== {item['id']}: {item['title']} ===", flush=True)
+    if parallel > 1:
+        # Agent items fan out, each in its own git worktree (a checkout
+        # is a cache of GitHub state — nothing needs to share one).
+        # Human items stay sequential: they block on terminal input.
+        agent_items = [i for i in selected if i["implementation"] == "agent"]
+        human_items = [i for i in selected if i["implementation"] == "human"]
+        factory = WorkspaceFactory(ctx.workspace.dir)
+        limit = asyncio.Semaphore(parallel)
 
-        if item["implementation"] == "human":
-            raw = input(f"[human item] {item['id']} is human-implemented; "
-                        "enter PR number when raised: ").strip()
-            pr = int(raw)
-            ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
-        else:
-            await run_coder(ctx, item, branch)
-            pr = await open_pr(ctx, item, branch)
+        async def worker(item: dict) -> ApprovedPR | None:
+            async with limit:
+                item_ctx = replace(
+                    ctx, workspace=factory.for_item(item["id"]))
+                return await process_item(item_ctx, item)
 
-        if not await run_code_reviewer(ctx, item, pr, branch):
-            continue
-        verified = await run_verify(ctx, item, pr, branch)
-        if verified is None:
-            continue
-        if not await run_preprod_ci(ctx, item, pr, verified):
-            continue
-        await run_approver(ctx, item, pr, verified)
-        if not await run_approval_gate(ctx, item, pr):
-            continue
-        ctx.approved.append(ApprovedPR(pr=pr, item=item, verified=verified))
+        print(f"[pipeline] running {len(agent_items)} agent items with "
+              f"up to {parallel} concurrent coders", flush=True)
+        results = list(await asyncio.gather(*(worker(i) for i in agent_items)))
+        for item in human_items:
+            results.append(await process_item(ctx, item))
+        factory.cleanup()
+    else:
+        results = [await process_item(ctx, item) for item in selected]
+
+    ctx.approved.extend(r for r in results if r)
 
     await run_release_pass(ctx)
     while any(not a.merged for a in ctx.approved):
