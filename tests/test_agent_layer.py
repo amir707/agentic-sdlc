@@ -100,6 +100,10 @@ def test_extract_json_variants():
 
 def _github_mock(request: httpx.Request) -> httpx.Response:
     path, method = request.url.path, request.method
+    if path.endswith("/pulls") and method == "GET":
+        if request.url.params.get("head") == "amir707:item/PAY-101-refund-totals":
+            return httpx.Response(200, json=[{"number": 7}])
+        return httpx.Response(200, json=[])
     if path.endswith("/pulls") and method == "POST":
         body = json.loads(request.content)
         assert body["head"] == "item/PAY-101-refund-totals"
@@ -137,6 +141,8 @@ def test_repo_host_contract():
     assert host.merge_pr(7) == "merged123"
     host.update_title(7, "[area:payments][risk:high][flag:yes] Add refund totals")
     assert host.get_pr(7)["head_sha"] == "abc123"
+    assert host.find_open_pr("item/PAY-101-refund-totals") == 7   # resume path
+    assert host.find_open_pr("item/CAT-201-count") is None
     assert "x-access-token:test-token@" in host.authenticated_remote()
 
 

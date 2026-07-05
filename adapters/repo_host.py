@@ -41,6 +41,15 @@ class GitHubRepoHost:
             "title": title, "body": body, "head": head, "base": base}))
         return resp.json()["number"]
 
+    def find_open_pr(self, head: str) -> int | None:
+        """Existing open PR for a branch, if any — resume support: a
+        rerun reuses the PR a crashed run already opened."""
+        owner = self.repo.split("/")[0]
+        resp = self._check(self.client.get(
+            "/pulls", params={"head": f"{owner}:{head}", "state": "open"}))
+        prs = resp.json()
+        return prs[0]["number"] if prs else None
+
     def post_comment(self, pr: int, body: str) -> None:
         self._check(self.client.post(f"/issues/{pr}/comments",
                                      json={"body": body}))

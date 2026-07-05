@@ -178,6 +178,13 @@ async def run_coder(ctx: RunContext, item: dict, branch: str,
 
 
 async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
+    # Resume support: a crashed run may already have opened this PR —
+    # the branch is the identity, the PR is reused, review proceeds.
+    existing = ctx.repo_host.find_open_pr(branch)
+    if existing:
+        print(f"[coder] PR #{existing} already open for {item['id']} "
+              "(reusing)", flush=True)
+        return existing
     body = (f"Item: {item['id']}\n\n"
             f"claimed_risk: {item['claimed_risk']} | "
             f"claimed_impact: {item['claimed_impact']} | "
@@ -503,6 +510,11 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
 
 
 async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
+    # Stale-incident hygiene: if a previous run left an incident open
+    # and the service has since recovered, close it now (the resolver
+    # also runs before every release pass).
+    await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
+
     assessments = await run_risk_assessor(ctx)
     selected = await run_sprint_packer(ctx, assessments)
 

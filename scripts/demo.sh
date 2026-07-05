@@ -75,7 +75,9 @@ pause "Beat 7: flip chaos OFF; wait ~2 healthy windows; run another
     release pass when prompted — the held PR merges."
 chaos off
 
-wait $ORCH_PID
+if ! wait $ORCH_PID; then
+    echo "[demo] orchestrator exited with a failure — receipts below show how far it got (rerun resumes)"
+fi
 
 # --- the receipts ---------------------------------------------------------------
 echo
