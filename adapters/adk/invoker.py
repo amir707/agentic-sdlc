@@ -107,6 +107,10 @@ class ADKInvoker:
             except Exception as exc:  # noqa: BLE001 — filtered below
                 if not _is_rate_limit(exc) or attempt >= retries:
                     raise
+                if "PerDay" in str(exc):
+                    # A DAILY quota will not recover within any retry
+                    # window — fail fast with the actionable summary.
+                    raise
                 delay = _retry_seconds(exc, attempt)
                 print(f"[invoker] {spec.name}: rate-limited (429); "
                       f"retry {attempt + 1}/{retries} in {delay:.0f}s",
