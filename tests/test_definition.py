@@ -4,7 +4,7 @@ key breaks loudly here instead of mid-demo."""
 
 from pathlib import Path
 
-from engine.config import load_project
+from orchestrator.config import load_project
 from orchestrator import driver
 from orchestrator.definition import GATE, REASONING, SDLC
 
@@ -18,7 +18,7 @@ def test_every_step_has_a_handler():
 def test_every_step_has_a_knowledge_folder():
     for step in SDLC.all_steps():
         if step.kind == GATE:
-            continue  # the gate's mechanics live in engine/gate.py
+            continue  # the gate's mechanics live in orchestrator/gate.py
         assert (ROOT / "sdlc_steps" / step.name).is_dir(), step.name
 
 

@@ -15,13 +15,13 @@ mcp:
 	$(PYTHON) -m mcp_server.server
 
 monitor:
-	$(PYTHON) -m sdlc_steps.monitor --url $$($(PYTHON) -m engine.deploy url)
+	$(PYTHON) -m sdlc_steps.monitor --url $$($(PYTHON) -m adapters.deploy url)
 
 orchestrate:
 	$(PYTHON) -m orchestrator --project $(PROJECT)
 
 deploy-baseline:
-	$(PYTHON) -m engine.deploy baseline
+	$(PYTHON) -m adapters.deploy baseline
 
 test:
 	$(PYTHON) -m pytest -q

@@ -18,7 +18,7 @@ def main() -> None:
     load_dotenv(ROOT / ".env")
     load_dotenv(ROOT / "config" / "projects" / args.project / ".env")
 
-    from engine.config import load_project
+    from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_pipeline
 
     project = load_project(args.project)

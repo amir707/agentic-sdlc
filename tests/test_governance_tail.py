@@ -4,7 +4,7 @@ math, resolver hysteresis. All pure logic — no network, no keys."""
 import textwrap
 from collections import deque
 
-from engine.config import load_project
+from orchestrator.config import load_project
 from sdlc_steps.monitor import window_error_rate
 from sdlc_steps.incident_resolver import decide
 from sdlc_steps.verify import verify

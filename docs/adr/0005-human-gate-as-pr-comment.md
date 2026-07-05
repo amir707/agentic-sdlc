@@ -13,7 +13,7 @@ decision expressed on the PR itself.
 
 The gate is a PR command comment: `/approve`, `/reject <reason>`, or
 `/hold`, authored by a user on the project's configurable approvers
-list (`approvers` in the approver step policy — engine default is an empty list at `sdlc_steps/approver/policy.yaml`; each project must set its own at `config/projects/<name>/sdlc_steps/approver/policy.yaml`). The approver agent
+list (`approvers` in the approver step policy — default is an empty list at `sdlc_steps/approver/policy.yaml`; each project must set its own at `config/projects/<name>/sdlc_steps/approver/policy.yaml`). The approver agent
 posts its decision-factors dossier as a PR comment first, so the human
 decides on the same artifact that carries the evidence. The
 orchestrator blocks, polling the PR until a valid command from an

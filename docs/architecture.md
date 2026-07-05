@@ -63,7 +63,7 @@ incident paths (per-caller bearer tokens).
 
 Knowledge splits by owner (ADR-0001): design invariants (structural,
 never injected) · step base prompts (`sdlc_steps/<step>/prompts.md`,
-engine-owned, open with immutable core rules) · step policy defaults
+system-owned, open with immutable core rules) · step policy defaults
 (`sdlc_steps/<step>/policy.yaml`; cross-step keys in
 `sdlc_steps/policy.yaml`; pipeline flow control in
 `sdlc_steps/orchestrator/policy.yaml`) · project overlays mirroring the
@@ -82,7 +82,7 @@ Composition order at invocation:
 | RepoHost | GitHub adapter | GitLab = one adapter + one config value |
 | Scheduler | for-loop driver | Pub/Sub work queue |
 | Sessions | ADK in-memory SessionService | ADK database/Vertex session service |
-| Pipeline | list of step objects + SequentialEngine | durable engine (Temporal-style, ADK Workflow) |
+| Pipeline | list of step objects + SequentialDriver | durable driver (Temporal-style, ADK Workflow) |
 | Store | SQLite behind MCP tools | Postgres behind the same tools |
 
 Second implementations are documented, never built: scope caps are

@@ -11,7 +11,7 @@ Invoked by the orchestrator before each release_manager pass, and by
 the demo loop periodically.
 """
 
-from engine.store_client import DeliveryStore
+from adapters.store_client import DeliveryStore
 
 
 def decide(open_incidents: list[dict], samples_by_area: dict[str, list[dict]],

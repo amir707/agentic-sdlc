@@ -10,7 +10,7 @@ diffs, gates approvals through humans, and makes incident-aware release
 decisions against a live deployed service.
 
 Built for the Kaggle "AI Agents: Intensive Vibe Coding Capstone
-Project" (Agents for Business track). The engine is project-agnostic;
+Project" (Agents for Business track). The SDLC runtime and its integrations are project-agnostic;
 the governed service lives in its own repo:
 [candidate-app](https://github.com/amir707/candidate-app) — agents open
 real PRs there — and everything specific to it lives under
@@ -47,18 +47,19 @@ sdlc_steps/       ONE FOLDER PER WORKER holding everything the worker is:
                   monitor — and spec.py model+tool wiring for reasoning
                   workers — risk_assessor, coder, code_reviewer, approver,
                   release_manager). Root policy.yaml holds shared keys.
-orchestrator/     the SDLC itself: definition.py (the pipeline as data —
-                  phases, step kinds, bounded back-edges, the human gate)
-                  and driver.py (sequential executor binding step names
-                  to handlers)
+orchestrator/     the SDLC process runtime: definition.py (the pipeline as data),
+                  driver.py (sequential executor), and execution mechanics
+                  (config overlays, invoker, git workspace, approval gate,
+                  rejection, dependency graph, agent helpers)
 config/projects/  one folder per governed project: project.yaml (repo,
                   areas, smoke endpoints), backlog.json (seed), .env
                   (project tokens, gitignored), and sdlc_steps/<step>/
                   overlays (customised-prompt.md, policy.yaml) mirroring
                   the root hierarchy
-engine/           project-agnostic mechanisms: ports/adapters (GitHub,
-                  Cloud Run deploy), analysis (dependency graph, diff),
-                  config overlays, invoker, approval gate, rejection
+tools/            agent-facing tools: fs_tools (sandboxed workspace edits
+                  and tests), diff_analysis (pull request diff parser)
+adapters/         boundary adapters: repo_host (GitHub REST API),
+                  store_client (MCP store client), deploy (Cloud Run deployer)
 mcp_server/       the delivery-store MCP server (single source of truth)
 scripts/          demo driver, deterministic eval, seeder, setup
 docs/             architecture, invariants, ADRs, setup runbook

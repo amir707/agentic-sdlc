@@ -3,12 +3,12 @@
 Pure reasoning over the payload (preprod result, verified labels,
 review threads, originating item): it assembles the dossier text and
 nothing else. The DECISION belongs to a human on the approvers list,
-given on the PR itself (engine/gate.py, ADR-0005).
+given on the PR itself (orchestrator/gate.py, ADR-0005).
 """
 
-from engine.agent_support import gemini_model
-from engine.config import ProjectConfig
-from engine.invoker import AgentSpec
+from orchestrator.agent_support import gemini_model
+from orchestrator.config import ProjectConfig
+from orchestrator.invoker import AgentSpec
 
 
 def build(project: ProjectConfig) -> AgentSpec:

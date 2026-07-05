@@ -14,7 +14,7 @@ from pathlib import Path
 
 import httpx
 
-from engine import deploy
+from adapters import deploy
 
 
 @dataclass

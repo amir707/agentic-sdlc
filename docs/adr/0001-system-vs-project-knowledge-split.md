@@ -1,13 +1,13 @@
-# ADR-0001: Engine-vs-project knowledge split
+# ADR-0001: System-vs-project knowledge split
 
 **Status:** accepted
 
 ## Context
 
-The governor is a multi-project engine: candidate-app is one project
-bundle, and a second project should be a new folder with the engine
+The governor is a multi-project runtime system: candidate-app is one project
+bundle, and a second project should be a new folder with the system
 untouched. Knowledge about how agents behave comes from several owners
-with different change cadences: the engine's designers, each agent's
+with different change cadences: the system's designers, each agent's
 definition, the team running a given project, and task procedure.
 
 ## Decision
@@ -16,15 +16,15 @@ Knowledge splits by OWNER, with an explicit prompt-vs-structure line:
 
 | Layer | Owner | Location | Injected? |
 |---|---|---|---|
-| Design invariants | engine | `docs/design-invariants.md` | never — enforced structurally |
-| Step base prompt (opens with core rules) | engine | `sdlc_steps/<step>/prompts.md` | always, first |
-| Step policy defaults | engine | `sdlc_steps/<step>/policy.yaml`; cross-step keys in `sdlc_steps/policy.yaml`; pipeline flow control in `sdlc_steps/orchestrator/policy.yaml` | read by deterministic tools |
+| Design invariants | system | `docs/design-invariants.md` | never — enforced structurally |
+| Step base prompt (opens with core rules) | system | `sdlc_steps/<step>/prompts.md` | always, first |
+| Step policy defaults | system | `sdlc_steps/<step>/policy.yaml`; cross-step keys in `sdlc_steps/policy.yaml`; pipeline flow control in `sdlc_steps/orchestrator/policy.yaml` | read by deterministic tools |
 | Project customised prompt | project | `config/projects/<name>/sdlc_steps/<step>/customised-prompt.md` | after base; extends only |
 | Project policy overrides | project | `config/projects/<name>/sdlc_steps/<step>/policy.yaml` | merged over step defaults |
-| Project definition & seed | project | `config/projects/<name>/project.yaml`, `backlog.json`, `.env` | read by engine/tools |
-| ADRs (the "why") | engine | `docs/adr/` | never — for humans and judges |
+| Project definition & seed | project | `config/projects/<name>/project.yaml`, `backlog.json`, `.env` | read by orchestrator/tools/adapters |
+| ADRs (the "why") | system | `docs/adr/` | never — for humans and judges |
 
-The project side MIRRORS the engine hierarchy (the overlay pattern):
+The project side MIRRORS the system hierarchy (the overlay pattern):
 customising a step means creating the same-shaped path under your
 project's config folder. Composition order at invocation: base
 prompts.md → customised-prompt.md → task payload. Each base prompt
@@ -42,7 +42,7 @@ it is policy, read by tools, referenced by skills by NAME, never copied.
 
 ## Consequences
 
-A team tunes its project's config folder without touching the engine;
+A team tunes its project's config folder without touching the system;
 a prompt change changes agent behavior and is versioned in git (audit
 entries implicitly reference the prompt version via commit SHA);
 context stays lean because each invocation loads only its own step's

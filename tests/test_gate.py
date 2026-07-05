@@ -1,6 +1,6 @@
 """Approval-gate tests: command parsing and the identity-checked scan."""
 
-from engine.gate import parse_command, scan
+from orchestrator.gate import parse_command, scan
 
 APPROVERS = ["amir707"]
 

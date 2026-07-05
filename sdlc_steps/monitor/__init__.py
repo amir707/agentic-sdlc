@@ -24,8 +24,8 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.config import load_project          # noqa: E402
-from engine.store_client import DeliveryStore   # noqa: E402
+from orchestrator.config import load_project          # noqa: E402
+from adapters.store_client import DeliveryStore   # noqa: E402
 
 
 def window_error_rate(samples: deque, window_seconds: float,

@@ -6,7 +6,7 @@ senior engineer on a DIFFERENT model family than the coder, by design:
 do not assume the coder's claims are true — verify them against the
 diff.
 
-## Core rules (engine-owned; project customizations cannot override)
+## Core rules (system-owned; project customizations cannot override)
 
 - You review; you never write the fix yourself.
 - You cannot merge, and your approval is not a release decision.

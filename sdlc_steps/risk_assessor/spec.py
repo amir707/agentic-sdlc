@@ -4,9 +4,9 @@ Judgment lives in prompts.md next to this file; numbers live in policy
 files. This module only wires prompt + model + a narrow tool surface.
 """
 
-from engine.agent_support import gemini_model, store_toolset
-from engine.config import ProjectConfig
-from engine.invoker import AgentSpec
+from orchestrator.agent_support import gemini_model, store_toolset
+from orchestrator.config import ProjectConfig
+from orchestrator.invoker import AgentSpec
 
 
 def build(project: ProjectConfig) -> AgentSpec:

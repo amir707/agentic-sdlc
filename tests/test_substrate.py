@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from engine.config import ConfigError, load_project
-from engine.dependency_graph import blast_radius, build_import_graph, dependents_closure
-from engine.diff_analysis import areas_touched, files_touched, flag_coverage
+from orchestrator.config import ConfigError, load_project
+from orchestrator.dependency_graph import blast_radius, build_import_graph, dependents_closure
+from tools.diff_analysis import areas_touched, files_touched, flag_coverage
 from sdlc_steps.sprint_packer import pack
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,7 +37,7 @@ def test_policy_overlay_resolution():
 def test_prompt_composition_order():
     project = load_project("candidate-app")
     prompt = project.prompt("code_reviewer")
-    base_marker = "Core rules (engine-owned"
+    base_marker = "Core rules (system-owned"
     custom_marker = "candidate-app customised prompt"
     assert base_marker in prompt and custom_marker in prompt
     assert prompt.index(base_marker) < prompt.index(custom_marker)

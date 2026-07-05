@@ -21,17 +21,17 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from engine.config import ProjectConfig
-from engine.dependency_graph import blast_radius, build_import_graph
-from engine.diff_analysis import files_touched
-from engine.gate import await_decision
-from engine.invoker import ADKInvoker, Invocation
-from engine.json_util import extract_json
-from engine.rejection import Rejection, reject
-from engine.repo_host import GitHubRepoHost
-from engine.store_client import DeliveryStore
-from engine.workspace import Workspace
-from engine import deploy
+from orchestrator.config import ProjectConfig
+from orchestrator.dependency_graph import blast_radius, build_import_graph
+from tools.diff_analysis import files_touched
+from orchestrator.gate import await_decision
+from orchestrator.invoker import ADKInvoker, Invocation
+from orchestrator.json_util import extract_json
+from orchestrator.rejection import Rejection, reject
+from adapters.repo_host import GitHubRepoHost
+from adapters.store_client import DeliveryStore
+from orchestrator.workspace import Workspace
+from adapters import deploy
 from sdlc_steps import incident_resolver, preprod_ci, sprint_packer, verify as verify_step
 from sdlc_steps.approver import spec as approver_spec
 from sdlc_steps.code_reviewer import spec as reviewer_spec
@@ -193,7 +193,7 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
             "dependency_closure": sorted(closure),
         }
         result = await ctx.invoke(
-            reviewer_spec.build(ctx.project, str(ctx.workspace.dir)),
+            reviewer_spec.build(ctx.project, str(ctx.workspace.dir), diff),
             json.dumps(payload, indent=2))
         verdict = extract_json(result.text)
 

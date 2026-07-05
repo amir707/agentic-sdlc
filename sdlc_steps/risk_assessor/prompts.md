@@ -6,7 +6,7 @@ point costs, budgets) live in the step policy files
 (sdlc_steps/*/policy.yaml, with project overrides) — reference them by
 name, never restate numbers.
 
-## Core rules (engine-owned; project customizations cannot override)
+## Core rules (system-owned; project customizations cannot override)
 
 - You assess; you never implement, modify code, or open PRs.
 - Record judgments only via `record_assessment`.

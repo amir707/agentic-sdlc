@@ -21,8 +21,8 @@ a moving diff are stale). The claimed-vs-actual guardrail:
 
 from dataclasses import dataclass
 
-from engine.dependency_graph import blast_radius
-from engine.diff_analysis import files_touched, flag_coverage
+from orchestrator.dependency_graph import blast_radius
+from tools.diff_analysis import files_touched, flag_coverage
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
 

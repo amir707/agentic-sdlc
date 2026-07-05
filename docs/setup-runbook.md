@@ -66,7 +66,7 @@ uv pip install -p .venv/bin/python -r requirements-dev.txt
 
 ## 5. Local secrets (.env, never committed)
 
-Secrets are split: engine-level in `.env` (model keys, MCP role
+Secrets are split: system-level in `.env` (model keys, MCP role
 tokens), project-level in `config/<project>/.env` (GitHub PAT, GCP
 target, chaos config token).
 
@@ -74,14 +74,14 @@ target, chaos config token).
 cd agentic-sdlc
 cp .env.example .env
 cp config/projects/candidate-app/.env.example config/projects/candidate-app/.env
-# generate the three MCP role tokens (engine .env) + chaos config token
+# generate the three MCP role tokens (system .env) + chaos config token
 # (project .env):
 python3 - <<'EOF'
 import secrets
 for name in ("CONFIG_TOKEN", "MCP_TOKEN_AGENTS", "MCP_TOKEN_MONITOR", "MCP_TOKEN_RESOLVER"):
     print(f"{name}={secrets.token_urlsafe(24)}")
 EOF
-# then add your own: ANTHROPIC_API_KEY, GOOGLE_API_KEY (engine .env);
+# then add your own: ANTHROPIC_API_KEY, GOOGLE_API_KEY (system .env);
 # GITHUB_TOKEN (project .env; fine-grained PAT scoped to
 # $GH_OWNER/candidate-app: contents + pull requests, read/write)
 ```
@@ -91,9 +91,9 @@ EOF
 ```bash
 cd agentic-sdlc
 set -a; source .env; source config/projects/candidate-app/.env; set +a
-.venv/bin/python -m engine.deploy baseline  # gcloud run deploy --source
-.venv/bin/python -m engine.deploy url       # print the live URL
-curl "$(.venv/bin/python -m engine.deploy url)/health"
+.venv/bin/python -m adapters.deploy baseline  # gcloud run deploy --source
+.venv/bin/python -m adapters.deploy url       # print the live URL
+curl "$(.venv/bin/python -m adapters.deploy url)/health"
 ```
 
 ## 7. (Recommended) dedicated deploy service account

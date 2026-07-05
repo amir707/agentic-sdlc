@@ -34,5 +34,5 @@ roles.
 
 The whole run is sequential and inspectable; every hand-off is visible
 as an artifact (a PR event or a store record). The scaling path (README)
-names the successors — webhook dispatch, work queues — as engine swaps
+names the successors — webhook dispatch, work queues — as orchestrator swaps
 that leave agents and the MCP surface untouched.

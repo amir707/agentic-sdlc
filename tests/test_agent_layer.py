@@ -7,11 +7,11 @@ import json
 import httpx
 import pytest
 
-from engine.config import load_project
-from engine.fs_tools import make_workspace_tools
-from engine.invoker import ADKInvoker
-from engine.json_util import extract_json
-from engine.repo_host import GitHubRepoHost, RepoHostError
+from orchestrator.config import load_project
+from tools.fs_tools import make_workspace_tools
+from orchestrator.invoker import ADKInvoker
+from orchestrator.json_util import extract_json
+from adapters.repo_host import GitHubRepoHost, RepoHostError
 
 
 # --- workspace sandbox -------------------------------------------------------
@@ -67,11 +67,11 @@ def test_specs_compose_prompts_and_models(tmp_path, monkeypatch):
     assert "Core rules" in coder.instruction
     assert "candidate-app customised prompt" in coder.instruction  # overlay applied
 
-    reviewer = reviewer_spec.build(project, str(tmp_path))
+    reviewer = reviewer_spec.build(project, str(tmp_path), "diff text")
     assert reviewer.model.startswith("gemini")
-    # read-only workspace: no write_file, no run_tests
+    # read-only workspace: no write_file, no run_tests, but has analyze_diff
     names = {t.__name__ for t in reviewer.tools}
-    assert names == {"list_files", "read_file"}
+    assert names == {"list_files", "read_file", "analyze_diff"}
 
     rm = rm_spec.build(project)
     # narrow store surface only

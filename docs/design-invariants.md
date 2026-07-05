@@ -44,5 +44,5 @@ has no tool to violate.
    and monitor (see ADR-0003).
 
 9. **Project config can tighten an agent, never loosen it.** Agent core
-   rules are engine-owned and immutable; project auxiliary rules are
+   rules are system-owned and immutable; project auxiliary rules are
    injected after them and cannot override them.

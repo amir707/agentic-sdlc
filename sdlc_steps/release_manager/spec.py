@@ -7,9 +7,9 @@ holds no credentials and cannot mutate anything directly. It only ever
 receives PRs that carry a human approval record (design invariant 3).
 """
 
-from engine.agent_support import gemini_model, store_toolset
-from engine.config import ProjectConfig
-from engine.invoker import AgentSpec
+from orchestrator.agent_support import gemini_model, store_toolset
+from orchestrator.config import ProjectConfig
+from orchestrator.invoker import AgentSpec
 
 
 def build(project: ProjectConfig) -> AgentSpec:
