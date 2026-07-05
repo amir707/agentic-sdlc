@@ -1,0 +1,8 @@
+# Release manager policy.
+# Override per project at
+# config/projects/<name>/sdlc_steps/release_manager/policy.yaml.
+
+# A deploy younger than this is "not yet confident": avoid stacking
+# merges with overlapping dependency closures inside this window.
+# Demo-small value; production would be 30+.
+deploy_confidence_minutes: 2

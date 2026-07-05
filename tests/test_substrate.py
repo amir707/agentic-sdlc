@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 
 from engine.config import ConfigError, load_project
-from tools.dependency_graph import blast_radius, build_import_graph, dependents_closure
-from tools.diff_analysis import areas_touched, files_touched, flag_coverage
-from tools.sprint_packer import pack
+from engine.dependency_graph import blast_radius, build_import_graph, dependents_closure
+from engine.diff_analysis import areas_touched, files_touched, flag_coverage
+from sdlc_steps.sprint_packer import pack
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -28,15 +28,15 @@ def test_policy_overlay_resolution():
     # project override wins over the engine's empty default
     assert project.policy("approver")["approvers"] == ["amir707"]
     # engine step defaults visible where the project has no override
-    assert project.policy("sprint-packer")["risk_budget"] == 2
+    assert project.policy("sprint_packer")["risk_budget"] == 2
     # shared key reaches steps that consume it
-    assert project.policy("code-reviewer")["flag_required_min_risk"] == "medium"
+    assert project.policy("code_reviewer")["flag_required_min_risk"] == "medium"
     assert project.policy("verify")["flag_required_min_risk"] == "medium"
 
 
 def test_prompt_composition_order():
     project = load_project("candidate-app")
-    prompt = project.prompt("code-reviewer")
+    prompt = project.prompt("code_reviewer")
     base_marker = "Core rules (engine-owned"
     custom_marker = "candidate-app customised prompt"
     assert base_marker in prompt and custom_marker in prompt
@@ -161,7 +161,7 @@ def test_pack_matches_seeded_demo_scenario():
         "CORE-303": _assessment("medium", "M", 60000),
     }
     project = load_project("candidate-app")
-    result = pack(items, assessments, project.policy("sprint-packer"))
+    result = pack(items, assessments, project.policy("sprint_packer"))
 
     assert [i["id"] for i in result.selected] == \
         ["PAY-101", "CAT-201", "PAY-102", "CAT-202"]

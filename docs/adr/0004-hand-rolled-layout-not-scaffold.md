@@ -26,5 +26,5 @@ deploy machinery is exactly the part this architecture does not want.
 The repo contains only code that earns its place and can be verified
 line-by-line before judging. The Agents CLI concept is claimed honestly
 in the writeup as build tooling (rubric accepts Code or Video for agent
-skills), alongside the runtime `sdlc-steps/` prompt mechanism. The cost:
+skills), alongside the runtime `sdlc_steps/` prompt mechanism. The cost:
 no scaffold-generated conveniences; accepted at this repo size.

@@ -57,21 +57,23 @@ def test_specs_compose_prompts_and_models(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_TOKEN_AGENTS", "t-agents")
     monkeypatch.setenv("CODER_MODEL", "anthropic/claude-sonnet-5")
     monkeypatch.setenv("REVIEWER_MODEL", "gemini-flash-latest")
-    from agents import specs
+    from sdlc_steps.code_reviewer import spec as reviewer_spec
+    from sdlc_steps.coder import spec as coder_spec
+    from sdlc_steps.release_manager import spec as rm_spec
 
     project = load_project("candidate-app")
-    coder = specs.coder(project, str(tmp_path))
+    coder = coder_spec.build(project, str(tmp_path))
     assert coder.model.startswith("anthropic/")
     assert "Core rules" in coder.instruction
     assert "candidate-app customised prompt" in coder.instruction  # overlay applied
 
-    reviewer = specs.code_reviewer(project, str(tmp_path))
+    reviewer = reviewer_spec.build(project, str(tmp_path))
     assert reviewer.model.startswith("gemini")
     # read-only workspace: no write_file, no run_tests
     names = {t.__name__ for t in reviewer.tools}
     assert names == {"list_files", "read_file"}
 
-    rm = specs.release_manager(project)
+    rm = rm_spec.build(project)
     # narrow store surface only
     assert len(rm.tools) == 1
 

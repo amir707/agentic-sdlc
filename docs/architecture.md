@@ -62,12 +62,12 @@ incident paths (per-caller bearer tokens).
 ## Knowledge architecture
 
 Knowledge splits by owner (ADR-0001): design invariants (structural,
-never injected) · step base prompts (`sdlc-steps/<step>/prompts.md`,
+never injected) · step base prompts (`sdlc_steps/<step>/prompts.md`,
 engine-owned, open with immutable core rules) · step policy defaults
-(`sdlc-steps/<step>/policy.yaml`; cross-step keys in
-`sdlc-steps/policy.yaml`; pipeline flow control in
-`sdlc-steps/orchestrator/policy.yaml`) · project overlays mirroring the
-same hierarchy (`config/projects/<name>/sdlc-steps/<step>/` —
+(`sdlc_steps/<step>/policy.yaml`; cross-step keys in
+`sdlc_steps/policy.yaml`; pipeline flow control in
+`sdlc_steps/orchestrator/policy.yaml`) · project overlays mirroring the
+same hierarchy (`config/projects/<name>/sdlc_steps/<step>/` —
 customised-prompt.md extends prompts, policy.yaml overrides numbers) ·
 ADRs (for humans, never injected).
 

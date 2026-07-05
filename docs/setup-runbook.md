@@ -91,9 +91,9 @@ EOF
 ```bash
 cd agentic-sdlc
 set -a; source .env; source config/projects/candidate-app/.env; set +a
-.venv/bin/python tools/deploy.py baseline   # gcloud run deploy --source
-.venv/bin/python tools/deploy.py url        # print the live URL
-curl "$(.venv/bin/python tools/deploy.py url)/health"
+.venv/bin/python -m engine.deploy baseline  # gcloud run deploy --source
+.venv/bin/python -m engine.deploy url       # print the live URL
+curl "$(.venv/bin/python -m engine.deploy url)/health"
 ```
 
 ## 7. (Recommended) dedicated deploy service account

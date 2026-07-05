@@ -1,15 +1,15 @@
 """Project bundle loading: prompts and policies via the overlay pattern.
 
 The engine is project-agnostic. Everything about one governed project
-lives under config/projects/<name>/, mirroring the root sdlc-steps/
+lives under config/projects/<name>/, mirroring the root sdlc_steps/
 hierarchy:
 
-- prompt for a step   = sdlc-steps/<step>/prompts.md
-                        + config/projects/<name>/sdlc-steps/<step>/customised-prompt.md (if present)
-- policy for a step   = sdlc-steps/policy.yaml            (shared defaults)
-                        <- sdlc-steps/<step>/policy.yaml   (step defaults)
-                        <- config/.../sdlc-steps/policy.yaml        (project shared overrides)
-                        <- config/.../sdlc-steps/<step>/policy.yaml (project step overrides)
+- prompt for a step   = sdlc_steps/<step>/prompts.md
+                        + config/projects/<name>/sdlc_steps/<step>/customised-prompt.md (if present)
+- policy for a step   = sdlc_steps/policy.yaml            (shared defaults)
+                        <- sdlc_steps/<step>/policy.yaml   (step defaults)
+                        <- config/.../sdlc_steps/policy.yaml        (project shared overrides)
+                        <- config/.../sdlc_steps/<step>/policy.yaml (project step overrides)
                         (later layers deep-merge over earlier ones)
 
 `load_project` validates the bundle up front so a malformed config
@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-SDLC_STEPS = ROOT / "sdlc-steps"
+SDLC_STEPS = ROOT / "sdlc_steps"
 PROJECTS = ROOT / "config" / "projects"
 
 
@@ -68,8 +68,8 @@ class ProjectConfig:
             layers = [
                 _read_yaml(SDLC_STEPS / "policy.yaml"),
                 _read_yaml(SDLC_STEPS / step / "policy.yaml"),
-                _read_yaml(self.project_dir / "sdlc-steps" / "policy.yaml"),
-                _read_yaml(self.project_dir / "sdlc-steps" / step / "policy.yaml"),
+                _read_yaml(self.project_dir / "sdlc_steps" / "policy.yaml"),
+                _read_yaml(self.project_dir / "sdlc_steps" / step / "policy.yaml"),
             ]
             merged: dict = {}
             for layer in layers:
@@ -87,7 +87,7 @@ class ProjectConfig:
         if not base.exists():
             raise ConfigError(f"no base prompt for step {step!r} ({base})")
         parts = [base.read_text()]
-        custom = (self.project_dir / "sdlc-steps" / step / "customised-prompt.md")
+        custom = (self.project_dir / "sdlc_steps" / step / "customised-prompt.md")
         if custom.exists():
             parts.append(custom.read_text())
         return "\n\n".join(parts)
@@ -133,12 +133,12 @@ def _validate(config: ProjectConfig) -> None:
     if not config.policy("approver").get("approvers"):
         raise ConfigError(
             f"project {config.name!r} has no approvers — set them in "
-            f"config/projects/{config.name}/sdlc-steps/approver/policy.yaml")
+            f"config/projects/{config.name}/sdlc_steps/approver/policy.yaml")
 
-    packer = config.policy("sprint-packer")
+    packer = config.policy("sprint_packer")
     for key in ("risk_points", "risk_budget", "token_budget", "reviewer_capacity"):
         if key not in packer:
-            raise ConfigError(f"sprint-packer policy missing {key!r}")
+            raise ConfigError(f"sprint_packer policy missing {key!r}")
 
     monitor = config.policy("monitor")
     for key in ("probe_interval_seconds", "window_seconds",
@@ -151,9 +151,9 @@ def _validate(config: ProjectConfig) -> None:
         if key not in flow:
             raise ConfigError(f"orchestrator policy missing {key!r}")
 
-    if config.policy("code-reviewer").get("flag_required_min_risk") is None:
+    if config.policy("code_reviewer").get("flag_required_min_risk") is None:
         raise ConfigError("shared policy missing flag_required_min_risk")
 
-    for step in ("risk-assessor", "coder", "code-reviewer",
-                 "approver", "release-manager"):
+    for step in ("risk_assessor", "coder", "code_reviewer",
+                 "approver", "release_manager"):
         config.prompt(step)  # raises if a base prompt is missing

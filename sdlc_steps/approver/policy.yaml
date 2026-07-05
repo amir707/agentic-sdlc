@@ -1,0 +1,9 @@
+# Approval gate policy.
+# The engine ships NO approvers: every project must set its own list at
+# config/projects/<name>/sdlc_steps/approver/policy.yaml — the startup
+# validator fails a project whose effective list is empty.
+
+# GitHub usernames allowed to decide the gate via PR command comments
+# (/approve, /reject <reason>, /hold). Comments from anyone else are
+# ignored and the ignore is audited.
+approvers: []

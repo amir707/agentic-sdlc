@@ -5,9 +5,9 @@ import textwrap
 from collections import deque
 
 from engine.config import load_project
-from monitor.synthetic_monitor import window_error_rate
-from tools.incident_resolver import decide
-from tools.verify_label import verify
+from sdlc_steps.monitor import window_error_rate
+from sdlc_steps.incident_resolver import decide
+from sdlc_steps.verify import verify
 
 
 def _payments_repo(tmp_path):

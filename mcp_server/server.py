@@ -179,7 +179,7 @@ def record_deploy(pr: int, revision: str, traffic: str) -> dict:
 
 @mcp.tool()
 def list_recent_deploys(window_minutes: int) -> list[dict]:
-    """Deploys within the trailing window (release-manager confidence input)."""
+    """Deploys within the trailing window (release_manager confidence input)."""
     with db.connect() as conn:
         return db.list_recent_deploys(conn, window_minutes)
 

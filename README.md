@@ -40,31 +40,35 @@ structural guarantees in
 ## Repository map
 
 ```
-sdlc-steps/       one folder per step/worker: reasoning steps carry an
-                  engine-owned base prompts.md (risk-assessor, coder,
-                  code-reviewer, approver, release-manager);
-                  deterministic workers carry policy.yaml defaults
-                  (sprint-packer, monitor, orchestrator); policy.yaml at
-                  the root holds keys shared by several steps
+sdlc_steps/       ONE FOLDER PER WORKER holding everything the worker is:
+                  its knowledge (prompts.md, policy.yaml) and its code
+                  (__init__.py implementation for deterministic workers —
+                  sprint_packer, verify, preprod_ci, incident_resolver,
+                  monitor — and spec.py model+tool wiring for reasoning
+                  workers — risk_assessor, coder, code_reviewer, approver,
+                  release_manager). Root policy.yaml holds shared keys.
+orchestrator/     the SDLC itself: definition.py (the pipeline as data —
+                  phases, step kinds, bounded back-edges, the human gate)
+                  and driver.py (sequential executor binding step names
+                  to handlers)
 config/projects/  one folder per governed project: project.yaml (repo,
-                  areas), backlog.json (seed), .env (project tokens,
-                  gitignored), and sdlc-steps/<step>/ overlays
-                  (customised-prompt.md, policy.yaml) mirroring the
-                  root hierarchy
-agents/           ADK agent definitions (thin: model + tools wiring)
-tools/            deterministic substrate: packer, diff analysis, deploy, CI
+                  areas, smoke endpoints), backlog.json (seed), .env
+                  (project tokens, gitignored), and sdlc_steps/<step>/
+                  overlays (customised-prompt.md, policy.yaml) mirroring
+                  the root hierarchy
+engine/           project-agnostic mechanisms: ports/adapters (GitHub,
+                  Cloud Run deploy), analysis (dependency graph, diff),
+                  config overlays, invoker, approval gate, rejection
 mcp_server/       the delivery-store MCP server (single source of truth)
-monitor/          synthetic prober (the only concurrent component)
-orchestrator.py   sequential pipeline driver
 scripts/          demo driver, deterministic eval, seeder, setup
 docs/             architecture, invariants, ADRs, setup runbook
 ```
 
-Composition per invocation: base `sdlc-steps/<step>/prompts.md` (opens
+Composition per invocation: base `sdlc_steps/<step>/prompts.md` (opens
 with immutable core rules) → project
-`config/projects/<name>/sdlc-steps/<step>/customised-prompt.md` if
+`config/projects/<name>/sdlc_steps/<step>/customised-prompt.md` if
 present (extends, never overrides) → task payload. Policy resolves the
-same way: step defaults (plus shared `sdlc-steps/policy.yaml`) merged
+same way: step defaults (plus shared `sdlc_steps/policy.yaml`) merged
 with the project's mirrored overrides.
 
 ## Setup
