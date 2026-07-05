@@ -7,3 +7,11 @@
 # (/approve, /reject <reason>, /hold). Comments from anyone else are
 # ignored and the ignore is audited.
 approvers: []
+
+# How the gate waits for the human decision (the decision itself is
+# ALWAYS the allowlisted GitHub comment; this only controls when the
+# orchestrator looks for it):
+#   poll  — check the PR every few seconds until a decision appears
+#   nudge — block until the operator presses Enter (or resumes the ADK
+#           workflow suspend), then check exactly once
+gate_mode: poll

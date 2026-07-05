@@ -29,3 +29,23 @@ is a deliberate carve-out from the no-polling rule (ADR-0003). The
 production successor is the same shape asynchronously: a GitHub review
 request, with the pipeline suspending at "awaiting approval" and
 resuming on decision.
+
+## Amendment (gate modes: poll / nudge / ADK suspend)
+
+The decision's authority never moves — it is always the allowlisted
+GitHub comment. What became configurable is WHEN the orchestrator looks
+for it (`gate_mode` in the approver step policy):
+
+- **poll** (default): check the PR every few seconds (`await_decision`).
+- **nudge**: block until the operator presses Enter, then check exactly
+  once (`check_decision`). No busy polling.
+- In the ADK Workflow expression the gate is a NATIVE `RequestInput`
+  suspend: resuming the workflow in the chat channel triggers one
+  `check_decision` look at the PR; no valid command there → it suspends
+  again with a fresh interrupt_id. The resume is a nudge, never a
+  decision — whoever resumes the chat cannot approve anything.
+
+Two correctness details shared by all modes: the scan baseline is
+captured when the DOSSIER is posted (a human who decides before the
+gate first looks is still seen), and a `/hold` advances the baseline
+past itself so a later `/approve` becomes visible.

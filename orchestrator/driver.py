@@ -24,7 +24,7 @@ from pathlib import Path
 from orchestrator.config import ProjectConfig
 from orchestrator.dependency_graph import blast_radius, build_import_graph
 from tools.diff_analysis import files_touched
-from orchestrator.gate import await_decision
+from orchestrator.gate import await_decision, check_decision
 from orchestrator.invoker import AgentInvoker, Invocation
 from orchestrator.json_util import extract_json
 from orchestrator import schemas
@@ -314,7 +314,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
 
 
 async def run_approver(ctx: RunContext, item: dict, pr: int,
-                       verified) -> None:
+                       verified) -> int:
     payload = {
         "task": "Assemble the decision dossier for this PR as one comment.",
         "item": item,
@@ -332,15 +332,39 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     approvers = ctx.project.policy("approver")["approvers"]
     ctx.repo_host.post_comment(pr, schemas.render_dossier(dossier, approvers))
     await ctx.audit("approver", "post_dossier", {"pr": pr})
+    # The gate baseline is captured HERE, at dossier-post time: a human
+    # who decides on GitHub before the gate first looks must be seen.
+    return len(ctx.repo_host.get_review_threads(pr))
 
 
-async def run_approval_gate(ctx: RunContext, item: dict, pr: int) -> bool:
-    approvers = ctx.project.policy("approver")["approvers"]
+async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
+                            baseline: int) -> bool:
+    policy = ctx.project.policy("approver")
+    approvers = policy["approvers"]
+    mode = policy.get("gate_mode", "poll")
     print(f"[gate] awaiting /approve, /reject <reason>, or /hold on PR #{pr} "
-          f"from {approvers}", flush=True)
+          f"from {approvers} (gate_mode: {mode})", flush=True)
+    audited_ignores: set = set()
+
     while True:
-        decision = await await_decision(ctx.repo_host, ctx.store, pr,
-                                        approvers)
+        if mode == "nudge":
+            # Human-nudged single check: the decision's AUTHORITY is the
+            # GitHub comment; pressing Enter (or resuming the ADK
+            # suspend) only triggers one look at it.
+            await asyncio.to_thread(
+                input, f"[gate] decide on PR #{pr} via a GitHub comment, "
+                       "then press Enter to check: ")
+            decision = await check_decision(ctx.repo_host, ctx.store, pr,
+                                            approvers, baseline,
+                                            audited_ignores)
+            if decision is None:
+                print("[gate] no decision from an allowlisted approver yet",
+                      flush=True)
+                continue
+        else:
+            decision = await await_decision(ctx.repo_host, ctx.store, pr,
+                                            approvers, baseline=baseline)
+
         if decision.kind == "approve":
             return True
         if decision.kind == "reject":
@@ -349,6 +373,9 @@ async def run_approval_gate(ctx: RunContext, item: dict, pr: int) -> bool:
                                    decision.reason or "no reason given"),
                          actor="approval_gate")
             return False
+        # A hold advances the baseline past itself so the NEXT command
+        # (e.g. a later /approve) becomes visible.
+        baseline = decision.comment_index + 1
         print(f"[gate] PR #{pr} on hold by {decision.author}; "
               "waiting for a final decision", flush=True)
 
@@ -432,8 +459,8 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         ci_ok = await run_preprod_ci(ctx, item, pr, verified)
     if not ci_ok:
         return None
-    await run_approver(ctx, item, pr, verified)
-    if not await run_approval_gate(ctx, item, pr):
+    baseline = await run_approver(ctx, item, pr, verified)
+    if not await run_approval_gate(ctx, item, pr, baseline):
         return None
     return ApprovedPR(pr=pr, item=item, verified=verified)
 

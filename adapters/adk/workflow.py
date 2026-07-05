@@ -9,17 +9,23 @@ the governance graph and step through it. Every node delegates to the
 SAME single-shot functions the driver uses (review_once, verify_once,
 run_coder, ...); nothing is reimplemented.
 
-The human gate maps to a blocking node rather than ADK's chat-side
-`RequestInput` HITL on purpose: our human input arrives as an
-allowlisted PR comment on GitHub (ADR-0005), not as a chat turn, so the
-node polls the artifact exactly as the driver does.
+The human gate is a NATIVE ADK SUSPEND (`RequestInput`) with one twist
+that keeps the identity model intact: the chat resume carries NO
+authority. The decision lives only in the allowlisted GitHub PR comment
+(ADR-0005); resuming the suspended workflow merely triggers ONE
+check_decision() look at the PR. No valid command there → the node
+suspends again (fresh interrupt_id per try). So ADK's HITL provides the
+waiting mechanics, GitHub provides the authenticated decision, and
+neither impersonates the other.
 """
 
 from google.adk.events.event import Event
-from google.adk.workflow import Workflow
+from google.adk.events.request_input import RequestInput
+from google.adk.workflow import FunctionNode, Workflow
 
 from orchestrator import driver
 from orchestrator.definition import SDLC
+from orchestrator.gate import check_decision
 
 # Name-level edge table (source, target, route|None). Kept as plain
 # data so tests can assert parity with orchestrator/definition.py
@@ -58,7 +64,8 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
     """
     flow = ctx.project.policy("orchestrator")
     state: dict = {"pr": None, "review_rounds": 0, "flag_fixes": 0,
-                   "verified": None}
+                   "verified": None, "gate_baseline": 0, "gate_tries": 0,
+                   "gate_ignores": set()}
 
     async def coder(node_input):
         await driver.run_coder(ctx, item, branch)
@@ -116,12 +123,40 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
         return Event(output=ok, route="passed" if ok else "failed")
 
     async def approver(node_input):
-        await driver.run_approver(ctx, item, state["pr"], state["verified"])
+        state["gate_baseline"] = await driver.run_approver(
+            ctx, item, state["pr"], state["verified"])
         return Event(output="dossier posted")
 
     async def approval_gate(node_input):
-        approved = await driver.run_approval_gate(ctx, item, state["pr"])
-        return Event(output=approved, route="approve" if approved else "reject")
+        """Native HITL suspend. The resume is a NUDGE, never a decision:
+        each rerun performs exactly one authenticated look at the PR."""
+        approvers = ctx.project.policy("approver")["approvers"]
+        decision = await check_decision(
+            ctx.repo_host, ctx.store, state["pr"], approvers,
+            state["gate_baseline"], state["gate_ignores"])
+
+        if decision and decision.kind == "approve":
+            yield Event(output=True, route="approve")
+            return
+        if decision and decision.kind == "reject":
+            from orchestrator.rejection import Rejection, reject
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(state["pr"], "human_declined", "backlog",
+                                   decision.reason or "no reason given"),
+                         actor="approval_gate")
+            yield Event(output=False, route="reject")
+            return
+        if decision:  # hold: advance past it, keep waiting
+            state["gate_baseline"] = decision.comment_index + 1
+
+        state["gate_tries"] += 1
+        held = f" (on hold by {decision.author})" if decision else ""
+        yield RequestInput(
+            interrupt_id=f"gate_pr{state['pr']}_try{state['gate_tries']}",
+            message=(f"PR #{state['pr']} awaits a decision on GitHub"
+                     f"{held}: an allowlisted approver comments /approve, "
+                     "/reject <reason>, or /hold on the PR. Decide there, "
+                     "then reply here (anything) to re-check."))
 
     def queued(node_input):
         driver_entry = driver.ApprovedPR(pr=state["pr"], item=item,
@@ -146,6 +181,10 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
              "escalated": escalated}
     for name, fn in nodes.items():
         fn.__name__ = name
+    # The gate must RERUN on resume (re-check GitHub) rather than treat
+    # the chat reply as its output — the reply is a nudge, not a value.
+    nodes["approval_gate"] = FunctionNode(
+        func=approval_gate, name="approval_gate", rerun_on_resume=True)
 
     # This ADK version encodes routing as (source, {route: target, ...});
     # unrouted edges are plain (source, target). Group the table by source.
