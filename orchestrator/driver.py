@@ -549,11 +549,18 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         pr = int(raw)
         ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
     else:
-        existing = ctx.repo_host.find_open_pr(branch)
-        if existing:
+        prior = ctx.repo_host.find_pr(branch, state="all")
+        if prior and prior["merged"]:
+            # Resume: this item already shipped in a previous run —
+            # re-implementing a merged change would diff to nothing.
+            print(f"[resume] {item['id']}: PR #{prior['number']} already "
+                  "merged — item complete, skipping", flush=True)
+            ctx.board.finish(item["id"], "already released")
+            return None
+        if prior and prior["state"] == "open":
             # Resume: an open PR means the coding already happened —
             # rejoin the pipeline at review instead of re-implementing.
-            pr = existing
+            pr = prior["number"]
             print(f"[resume] {item['id']}: open PR #{pr} found — "
                   "skipping coder, resuming at review", flush=True)
             ctx.workspace.checkout(branch)

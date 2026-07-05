@@ -103,8 +103,14 @@ def test_extract_json_variants():
 def _github_mock(request: httpx.Request) -> httpx.Response:
     path, method = request.url.path, request.method
     if path.endswith("/pulls") and method == "GET":
-        if request.url.params.get("head") == "amir707:item/PAY-101-refund-totals":
-            return httpx.Response(200, json=[{"number": 7}])
+        head = request.url.params.get("head")
+        if head == "amir707:item/PAY-101-refund-totals":
+            return httpx.Response(200, json=[
+                {"number": 7, "state": "open", "merged_at": None}])
+        if head == "amir707:item/DONE-1-shipped":
+            return httpx.Response(200, json=[
+                {"number": 5, "state": "closed",
+                 "merged_at": "2026-07-06T01:00:00Z"}])
         return httpx.Response(200, json=[])
     if path.endswith("/pulls") and method == "POST":
         body = json.loads(request.content)
@@ -145,6 +151,9 @@ def test_repo_host_contract():
     assert host.get_pr(7)["head_sha"] == "abc123"
     assert host.find_open_pr("item/PAY-101-refund-totals") == 7   # resume path
     assert host.find_open_pr("item/CAT-201-count") is None
+    # merged-PR detection: a shipped item must never be re-implemented
+    shipped = host.find_pr("item/DONE-1-shipped", state="all")
+    assert shipped == {"number": 5, "state": "closed", "merged": True}
     assert "x-access-token:test-token@" in host.authenticated_remote()
 
 

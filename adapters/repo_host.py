@@ -44,11 +44,22 @@ class GitHubRepoHost:
     def find_open_pr(self, head: str) -> int | None:
         """Existing open PR for a branch, if any — resume support: a
         rerun reuses the PR a crashed run already opened."""
+        pr = self.find_pr(head, state="open")
+        return pr["number"] if pr else None
+
+    def find_pr(self, head: str, state: str = "open") -> dict | None:
+        """Newest PR for a branch in the given state ('open'|'all') —
+        resume support: {'number', 'state', 'merged'}. A merged PR means
+        the item already shipped and must not be re-implemented."""
         owner = self.repo.split("/")[0]
         resp = self._check(self.client.get(
-            "/pulls", params={"head": f"{owner}:{head}", "state": "open"}))
+            "/pulls", params={"head": f"{owner}:{head}", "state": state,
+                              "sort": "created", "direction": "desc"}))
         prs = resp.json()
-        return prs[0]["number"] if prs else None
+        if not prs:
+            return None
+        return {"number": prs[0]["number"], "state": prs[0]["state"],
+                "merged": prs[0].get("merged_at") is not None}
 
     def post_comment(self, pr: int, body: str) -> None:
         self._check(self.client.post(f"/issues/{pr}/comments",
