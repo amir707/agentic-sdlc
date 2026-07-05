@@ -87,3 +87,32 @@ def test_assessor_resumes_instead_of_reassessing():
     asyncio.run(run_risk_assessor(ctx))
     # Only the unassessed item triggered an invocation.
     assert store.calls == ["risk_assessor"]
+
+
+def test_activity_board_tracks_busy_and_durations(tmp_path):
+    import json
+    import time
+
+    from orchestrator.activity import (ActivityBoard, read_board,
+                                       read_recent_history)
+
+    board = ActivityBoard(tmp_path / ".activity.json")
+    board.begin("PAY-101", "coder", "implementing")
+    board.begin("CAT-201", "coder", "implementing")   # parallel item
+
+    current = read_board(tmp_path / ".activity.json")["current"]
+    assert set(current) == {"PAY-101", "CAT-201"}
+    assert current["PAY-101"]["step"] == "coder"
+
+    time.sleep(0.05)
+    board.begin("PAY-101", "code_reviewer", "PR #7 round 1")  # step handoff
+    board.finish("CAT-201", "queued for release")
+
+    current = read_board(tmp_path / ".activity.json")["current"]
+    assert set(current) == {"PAY-101"}
+    assert current["PAY-101"]["step"] == "code_reviewer"
+
+    history = read_recent_history(tmp_path / ".activity.json")
+    assert [h["step"] for h in history] == ["coder", "coder"]
+    assert all(h["seconds"] >= 0 for h in history)
+    assert history[1]["outcome"] == "queued for release"

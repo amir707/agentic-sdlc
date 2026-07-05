@@ -21,9 +21,45 @@ def section(title: str) -> None:
     print(f"\n== {title} ==")
 
 
+def _elapsed(seconds: float) -> str:
+    return f"{int(seconds // 60)}m{int(seconds % 60):02d}s" \
+        if seconds >= 60 else f"{seconds:.0f}s"
+
+
+def _render_activity() -> None:
+    """Live 'who is doing what, since when' from the activity board."""
+    import time
+
+    from orchestrator.activity import read_board, read_recent_history
+
+    board = read_board()
+    section("NOW: active workers (live)")
+    if not board or not board.get("current"):
+        age = time.time() - board["updated"] if board else None
+        print("  idle" + (f" (board updated {_elapsed(age)} ago)"
+                          if age is not None else " (no run yet)"))
+    else:
+        stale = time.time() - board["updated"] > 300
+        for item, entry in sorted(board["current"].items()):
+            busy = _elapsed(time.time() - entry["since"])
+            print(f"  {item:<9} {entry['step']:<16} {busy:>7}  "
+                  f"{entry['detail']}")
+        if stale:
+            print("  (board >5min stale — the run may have crashed)")
+
+    history = read_recent_history()
+    if history:
+        section("recently completed steps")
+        for h in history:
+            print(f"  {h['item']:<9} {h['step']:<16} "
+                  f"{_elapsed(h['seconds']):>7}  -> {h['outcome']}")
+
+
 def main() -> None:
     conn = db.connect()
     db.init_schema(conn)
+
+    _render_activity()
 
     section("backlog vs assessments (claimed -> assessed)")
     rows = conn.execute("""

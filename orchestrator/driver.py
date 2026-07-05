@@ -24,6 +24,7 @@ from pathlib import Path
 from orchestrator.config import ProjectConfig
 from orchestrator.dependency_graph import blast_radius, build_import_graph
 from tools.diff_analysis import files_touched
+from orchestrator.activity import ActivityBoard
 from orchestrator.gate import await_decision, check_decision
 from orchestrator.invoker import AgentInvoker, Invocation
 from orchestrator.json_util import extract_json
@@ -61,6 +62,8 @@ class RunContext:
     # fight over revision creation; CI is the one per-item stage that
     # must queue even when coders run in parallel.
     ci_lock: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
+    # Live "who is doing what, since when" (rendered by make watch).
+    board: ActivityBoard = field(default_factory=ActivityBoard)
 
     async def invoke(self, spec, message: str) -> Invocation:
         """Every invocation is metered: token spend is sprint capacity."""
@@ -104,6 +107,7 @@ async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
                   flush=True)
             continue
         print(f"[assess] {item['id']}: {item['title']}", flush=True)
+        ctx.board.begin(item["id"], "risk_assessor", item["title"][:40])
         payload = {
             "task": ("Assess this backlog item and record your judgment via "
                      "record_assessment."),
@@ -112,6 +116,7 @@ async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
         }
         await ctx.invoke(assessor_spec.build(ctx.project),
                          json.dumps(payload, indent=2))
+        ctx.board.finish(item["id"], "assessed")
 
     assessments = {a["item_id"]: a
                    for a in await ctx.store.call("list_assessments")}
@@ -149,10 +154,12 @@ async def run_coder(ctx: RunContext, item: dict, branch: str,
     """First call implements the item on a fresh branch; calls with
     feedback fix it in place (the generator half of the loop)."""
     if feedback is None:
+        ctx.board.begin(item["id"], "coder", "implementing")
         ctx.workspace.start_branch(branch)
         task = ("Implement this backlog item in the workspace. Follow your "
                 "core rules and the project conventions.")
     else:
+        ctx.board.begin(item["id"], "coder", "fixing per feedback")
         task = ("Address the feedback below on your existing implementation "
                 "in the workspace. Fix what is blocking; reply through code.")
 
@@ -194,6 +201,8 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
     """One review round (single-shot: the Workflow expression reuses
     this as a node; the driver loops it below). Posts the verdict as a
     PR comment and returns it schema-validated."""
+    ctx.board.begin(item["id"], "code_reviewer",
+                    f"PR #{pr} round {iteration + 1}")
     diff = ctx.repo_host.get_diff(pr)
     closure = blast_radius(ctx.workspace.dir, files_touched(diff))
     payload = {
@@ -261,6 +270,7 @@ async def verify_once(ctx: RunContext, item: dict,
     """One verify pass (single-shot: reused by the Workflow expression).
     Audits any escalation; writes verified labels into the PR title
     when the flag policy is satisfied."""
+    ctx.board.begin(item["id"], "verify", f"PR #{pr} claimed-vs-actual")
     diff = ctx.repo_host.get_diff(pr)
     result = verify_step.verify(diff, item["claimed_risk"], ctx.project,
                                 str(ctx.workspace.dir))
@@ -309,6 +319,8 @@ async def run_verify(ctx: RunContext, item: dict, pr: int,
 
 async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
                          verified) -> bool:
+    ctx.board.begin(item["id"], "preprod_ci",
+                    f"PR #{pr} build + tagged revision + smoke")
     ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir), verified.areas,
                                 ctx.project)
     ctx.repo_host.post_comment(pr, preprod_ci.format_comment(ci))
@@ -325,6 +337,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
 
 async def run_approver(ctx: RunContext, item: dict, pr: int,
                        verified) -> int:
+    ctx.board.begin(item["id"], "approver", f"PR #{pr} assembling dossier")
     payload = {
         "task": "Assemble the decision dossier for this PR as one comment.",
         "item": item,
@@ -352,6 +365,8 @@ async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
     policy = ctx.project.policy("approver")
     approvers = policy["approvers"]
     mode = policy.get("gate_mode", "poll")
+    ctx.board.begin(item["id"], "approval_gate",
+                    f"PR #{pr} awaiting {approvers}")
     print(f"[gate] awaiting /approve, /reject <reason>, or /hold on PR #{pr} "
           f"from {approvers} (gate_mode: {mode})", flush=True)
     audited_ignores: set = set()
@@ -393,11 +408,15 @@ async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
 # --- release phase -----------------------------------------------------------
 
 async def run_release_pass(ctx: RunContext) -> None:
+    ctx.board.begin("RELEASE", "incident_resolver", "checking recovery")
     await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
     queue = [a for a in ctx.approved if not a.merged]
     if not queue:
+        ctx.board.finish("RELEASE", "queue empty")
         print("[release] queue empty", flush=True)
         return
+    ctx.board.begin("RELEASE", "release_manager",
+                    f"deciding {[a.pr for a in queue]}")
 
     payload = {
         "task": ("Decide merge/hold and ordering for the approved queue. "
@@ -442,6 +461,8 @@ async def run_release_pass(ctx: RunContext) -> None:
             print(f"[release] HELD PR #{entry.pr}: "
                   f"{decision.reasoning}", flush=True)
 
+    ctx.board.finish("RELEASE", "pass complete")
+
 
 # --- the run -----------------------------------------------------------------
 
@@ -452,6 +473,7 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     print(f"\n=== {item['id']}: {item['title']} ===", flush=True)
 
     if item["implementation"] == "human":
+        ctx.board.begin(item["id"], "await_human_pr", "team implements")
         raw = input(f"[human item] {item['id']} is human-implemented; "
                     "enter PR number when raised: ").strip()
         pr = int(raw)
@@ -461,17 +483,22 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         pr = await open_pr(ctx, item, branch)
 
     if not await run_code_reviewer(ctx, item, pr, branch):
+        ctx.board.finish(item["id"], "stopped at review")
         return None
     verified = await run_verify(ctx, item, pr, branch)
     if verified is None:
+        ctx.board.finish(item["id"], "stopped at verify (flag)")
         return None
     async with ctx.ci_lock:
         ci_ok = await run_preprod_ci(ctx, item, pr, verified)
     if not ci_ok:
+        ctx.board.finish(item["id"], "failed preprod")
         return None
     baseline = await run_approver(ctx, item, pr, verified)
     if not await run_approval_gate(ctx, item, pr, baseline):
+        ctx.board.finish(item["id"], "rejected at gate")
         return None
+    ctx.board.finish(item["id"], "queued for release")
     return ApprovedPR(pr=pr, item=item, verified=verified)
 
 
