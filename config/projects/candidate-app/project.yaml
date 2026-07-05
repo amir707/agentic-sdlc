@@ -15,3 +15,10 @@ areas:
   catalog:
     - app/catalog
 default_area: core
+
+# One representative endpoint per area: preprod smoke tests hit the
+# changed area's endpoint; the synthetic monitor probes all of them.
+smoke_endpoints:
+  core: /health
+  payments: /payments/summary
+  catalog: /catalog/items

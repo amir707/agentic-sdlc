@@ -59,6 +59,7 @@ class ProjectConfig:
     areas: dict[str, list[str]]
     default_area: str
     project_dir: Path
+    smoke_endpoints: dict[str, str] = field(default_factory=dict)
     _policies: dict[str, dict] = field(default_factory=dict)
 
     def policy(self, step: str) -> dict:
@@ -121,6 +122,7 @@ def load_project(name: str) -> ProjectConfig:
         areas=definition["areas"],
         default_area=definition["default_area"],
         project_dir=project_dir,
+        smoke_endpoints=definition.get("smoke_endpoints", {}),
     )
     _validate(config)
     return config

@@ -1,0 +1,13 @@
+# Verify + label step policy (deterministic step; risk recomputation
+# rules). Override per project at
+# config/projects/<name>/sdlc-steps/verify/policy.yaml.
+
+# Areas whose request paths make a change AT LEAST medium risk when the
+# diff's dependency closure touches them — regardless of what the item
+# claimed. This is the claimed-vs-actual guardrail's floor rule.
+sensitive_areas:
+  - payments
+
+# A closure spanning at least this many modules is a wide blast radius:
+# floor medium.
+wide_radius_modules: 4
