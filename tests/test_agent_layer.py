@@ -166,3 +166,30 @@ def test_rate_limit_detection_and_backoff():
     assert _retry_seconds(anthropic_429, 1) == 30.0   # exponential fallback
 
     assert not _is_rate_limit(Exception("400 INVALID_ARGUMENT"))
+
+
+def test_gemini_requests_are_paced():
+    """Free-tier RPM protection: consecutive model requests through the
+    limiter are spaced by the minimum interval."""
+    import asyncio
+    import time
+
+    from adapters.adk.invoker import MinIntervalLimiter
+
+    async def scenario():
+        limiter = MinIntervalLimiter(0.05)
+        start = time.monotonic()
+        for _ in range(3):
+            await limiter.wait()
+        return time.monotonic() - start
+
+    assert asyncio.run(scenario()) >= 0.10   # 3 calls -> 2 enforced gaps
+
+    async def disabled():
+        limiter = MinIntervalLimiter(0)
+        start = time.monotonic()
+        for _ in range(3):
+            await limiter.wait()
+        return time.monotonic() - start
+
+    assert asyncio.run(disabled()) < 0.05    # GEMINI_RPM=0 -> no pacing

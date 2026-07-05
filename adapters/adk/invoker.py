@@ -49,6 +49,43 @@ def _resolve_model(model: str):
     return model if model.startswith("gemini") else LiteLlm(model=model)
 
 
+class MinIntervalLimiter:
+    """Proactive request pacing: free-tier Gemini enforces N requests
+    per MINUTE per model, and one agent invocation is several model
+    turns — so pacing must happen per REQUEST (before_model_callback),
+    not per invocation. Shared across all Gemini agents in the process
+    (the quota is per project, not per agent)."""
+
+    def __init__(self, min_interval: float):
+        self.min_interval = min_interval
+        self._last = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        if self.min_interval <= 0:
+            return
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            due = self._last + self.min_interval
+            now = loop.time()
+            if due > now:
+                await asyncio.sleep(due - now)
+            self._last = asyncio.get_running_loop().time()
+
+
+def _gemini_limiter() -> MinIntervalLimiter:
+    """GEMINI_RPM env (default 12, safely under the 15/min free tier);
+    set GEMINI_RPM=0 to disable when billing is enabled."""
+    global _LIMITER
+    if _LIMITER is None:
+        rpm = float(os.environ.get("GEMINI_RPM", "12"))
+        _LIMITER = MinIntervalLimiter(60.0 / rpm if rpm > 0 else 0.0)
+    return _LIMITER
+
+
+_LIMITER: MinIntervalLimiter | None = None
+
+
 def _is_rate_limit(exc: BaseException) -> bool:
     text = str(exc)
     return "429" in text or "RESOURCE_EXHAUSTED" in text \
@@ -75,12 +112,20 @@ def build_llm_agent(spec: AgentSpec, meter=None,
         raise ValueError(
             f"{spec.name}: output_schema and tools are mutually exclusive "
             "on LLM agents — tool-using agents return JSON text instead")
+
+    throttle = None
+    if spec.model.startswith("gemini"):
+        async def throttle(callback_context, llm_request):
+            await _gemini_limiter().wait()
+            return None
+
     return LlmAgent(
         name=spec.name,
         model=_resolve_model(spec.model),
         instruction=spec.instruction,
         tools=[_materialize_tool(t) for t in spec.tools],
         output_schema=spec.output_schema,
+        before_model_callback=throttle,
         after_model_callback=meter,
         generate_content_config=types.GenerateContentConfig(
             max_output_tokens=max_output_tokens or int(
