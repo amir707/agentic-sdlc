@@ -3,6 +3,7 @@
 
 PYTHON := .venv/bin/python
 PROJECT ?= candidate-app
+PARALLEL ?= 1
 
 include .env
 -include projects-config/$(PROJECT)/.env
@@ -18,7 +19,7 @@ monitor:
 	$(PYTHON) -m sdlc_steps.monitor --url $$($(PYTHON) -m adapters.deploy url)
 
 orchestrate:
-	$(PYTHON) -m orchestrator --project $(PROJECT)
+	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
 
 deploy-baseline:
 	$(PYTHON) -m adapters.deploy baseline
