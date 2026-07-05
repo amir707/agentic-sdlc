@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -16,6 +17,9 @@ def main() -> None:
         "--parallel", type=int, default=1, metavar="N",
         help="run up to N coders concurrently, each in its own git "
              "worktree (default 1: sequential, per ADR-0003)")
+    parser.add_argument("--debug", action="store_true",
+                        help="show full tracebacks instead of one-line "
+                             "failure summaries")
     args = parser.parse_args()
 
     # Engine secrets first, then the project's own.
@@ -29,7 +33,21 @@ def main() -> None:
     # Composition root: the ONLY place a framework is chosen (ADR-0007).
     project = load_project(args.project)
     ctx = build_context(project, invoker=ADKInvoker())
-    asyncio.run(run_pipeline(ctx, parallel=args.parallel))
+    try:
+        asyncio.run(run_pipeline(ctx, parallel=args.parallel))
+    except KeyboardInterrupt:
+        print("\n[orchestrator] interrupted — progress is in the store; "
+              "rerunning resumes", file=sys.stderr)
+        sys.exit(130)
+    except Exception as exc:  # noqa: BLE001 — top level: summarize
+        if args.debug:
+            raise
+        from orchestrator.errors import one_line
+        print(f"\n[orchestrator] FAILED: {one_line(exc)}", file=sys.stderr)
+        print("[orchestrator] progress is checkpointed in the store — "
+              "rerunning resumes; --debug for the full traceback",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

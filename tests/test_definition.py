@@ -116,3 +116,28 @@ def test_activity_board_tracks_busy_and_durations(tmp_path):
     assert [h["step"] for h in history] == ["coder", "coder"]
     assert all(h["seconds"] >= 0 for h in history)
     assert history[1]["outcome"] == "queued for release"
+
+
+def test_error_summaries_are_one_actionable_line():
+    from orchestrator.errors import one_line
+
+    daily = Exception(
+        "429 RESOURCE_EXHAUSTED. ... 'quotaId': "
+        "'GenerateRequestsPerDayPerProjectPerModel-FreeTier' ... "
+        "Please retry in 57.48s.")
+    assert "DAILY" in one_line(daily) and "billing" in one_line(daily)
+
+    minute = Exception("429 RESOURCE_EXHAUSTED ... Please retry in 8.4s.")
+    assert "retry in 8s" in one_line(minute)
+
+    class StoreError(Exception):
+        pass
+    assert one_line(StoreError("open_incident: restricted to roles")) \
+        .startswith("open_incident")
+
+    grouped = BaseExceptionGroup("boom", [ValueError("Connection refused "
+                                                     "to 127.0.0.1:8787")])
+    assert "make mcp" in one_line(grouped)
+
+    unknown = Exception("something odd\nwith many lines\nof detail")
+    assert one_line(unknown) == "Exception: something odd"
