@@ -29,6 +29,10 @@ demo:
 status:
 	$(PYTHON) scripts/store_status.py
 
+# live store view: refreshes every 5s (4th terminal during demos)
+watch:
+	while true; do clear; $(PYTHON) scripts/store_status.py; sleep 5; done
+
 verify-demo:
 	$(PYTHON) scripts/verify_demo.py
 
@@ -38,4 +42,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline demo status verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate deploy-baseline demo status watch verify-demo adk-web test
