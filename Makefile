@@ -1,7 +1,7 @@
 # Demo runbook targets. Three long-running pieces run in separate
 # terminals: mcp (store), monitor (prober), orchestrate (pipeline).
 
-PYTHON ?= .venv/bin/python
+PYTHON := .venv/bin/python
 PROJECT ?= candidate-app
 
 include .env
@@ -23,10 +23,19 @@ orchestrate:
 deploy-baseline:
 	$(PYTHON) -m adapters.deploy baseline
 
+demo:
+	bash scripts/demo.sh
+
+status:
+	$(PYTHON) scripts/store_status.py
+
+verify-demo:
+	$(PYTHON) scripts/verify_demo.py
+
 adk-web:
 	.venv/bin/adk web tests/debug/adk_web
 
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline adk-web test
+.PHONY: seed mcp monitor orchestrate deploy-baseline demo status verify-demo adk-web test

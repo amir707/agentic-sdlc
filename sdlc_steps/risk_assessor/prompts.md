@@ -26,14 +26,20 @@ developer would actually write — not its best-case version.
 - behavior changes that cannot be gated behind a feature flag.
 
 **medium** — any of:
-- additive changes on a sensitive path (payments) or to a response
-  contract (new fields consumers may start depending on);
+- ANY change on a sensitive path (payments), even a purely additive
+  field;
 - changes to shared middleware or core plumbing that every route
   crosses;
-- new configuration surface affecting runtime behavior.
+- changes that MODIFY or REMOVE parts of a response contract existing
+  consumers parse.
 
 **low** — additive, isolated, easily reversible changes outside
-sensitive paths, with existing behavior untouched.
+sensitive paths, with existing behavior untouched. A NEW field or an
+optional filter on a non-sensitive endpoint is LOW, not medium:
+consumers cannot break on a field they never read. When an item as
+described names no sensitive path, rate what is described — catching a
+description that understates its real blast radius is the verify
+step's job, not yours.
 
 Use the dependency graph provided in context: risk follows the
 transitive closure of what the change touches (blast radius), not the

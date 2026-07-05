@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Human-readable snapshot of the delivery store (read-only).
+
+The store is a single SQLite file precisely so it can be inspected with
+any client; this is the curated view: assessments beside their claims,
+the current sprint, incidents, deploys, and the audit tail.
+
+Usage: make status   (or: .venv/bin/python scripts/store_status.py)
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from mcp_server import db  # noqa: E402
+
+
+def section(title: str) -> None:
+    print(f"\n== {title} ==")
+
+
+def main() -> None:
+    conn = db.connect()
+    db.init_schema(conn)
+
+    section("backlog vs assessments (claimed -> assessed)")
+    rows = conn.execute("""
+        SELECT b.id, b.claimed_risk, b.implementation, b.priority_rank,
+               a.risk, a.effort, a.token_estimate, a.recommend_split
+        FROM backlog_items b
+        LEFT JOIN (SELECT x.* FROM assessments x
+                   JOIN (SELECT item_id, MAX(ts) ts FROM assessments
+                         GROUP BY item_id) m
+                     ON x.item_id = m.item_id AND x.ts = m.ts) a
+          ON a.item_id = b.id
+        ORDER BY b.priority_rank""").fetchall()
+    for r in rows:
+        assessed = (f"{r['risk']:<6} effort={r['effort']} "
+                    f"~{r['token_estimate']} tok"
+                    + ("  SPLIT!" if r["recommend_split"] else "")
+                    ) if r["risk"] else "— not assessed yet"
+        print(f"  {r['id']:<9} claimed={r['claimed_risk']:<6} "
+              f"[{r['implementation']:<5}]  ->  {assessed}")
+
+    section("current sprint")
+    sprint = db.current_sprint(conn)
+    if sprint:
+        print(f"  #{sprint['id']} items={sprint['item_ids']}")
+        print(f"  rationale: {sprint['rationale']}")
+    else:
+        print("  none yet")
+
+    section("incidents")
+    for i in conn.execute("SELECT * FROM incidents ORDER BY id"):
+        print(f"  #{i['id']} {i['area']:<9} {i['status']:<9} "
+              f"error_rate={i['error_rate']} opened={i['opened_at']}")
+    section("deploys")
+    for d in conn.execute("SELECT * FROM deploys ORDER BY id"):
+        print(f"  pr#{d['pr']} {d['revision']:<10} traffic={d['traffic']:<8} "
+              f"{d['ts']}")
+
+    section("token usage (capacity spent)")
+    for u in db.summarize_token_usage(conn):
+        print(f"  {u['agent']:<16} {u['model']:<28} "
+              f"in={u['input_tokens']} out={u['output_tokens']} "
+              f"calls={u['calls']}")
+
+    section("audit tail (last 10)")
+    for e in db.list_audit(conn)[-10:]:
+        print(f"  #{e['id']:>3} {e['actor']:<16} {e['decision']:<26} "
+              f"{json.dumps(e['factors'])[:70]}")
+
+
+if __name__ == "__main__":
+    main()

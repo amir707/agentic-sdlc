@@ -15,14 +15,11 @@ Run: python -m sdlc_steps.monitor --url <live-url> [--project candidate-app]
 
 import argparse
 import asyncio
-import sys
 import time
 from collections import deque
 from pathlib import Path
 
 import httpx
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from orchestrator.config import load_project          # noqa: E402
 from adapters.store_client import DeliveryStore   # noqa: E402

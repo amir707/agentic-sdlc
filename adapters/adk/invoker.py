@@ -11,7 +11,9 @@ usage included), with the event-scan kept as a fallback for models
 that only report usage on events.
 """
 
+import asyncio
 import os
+import re
 
 from google.adk.agents import LlmAgent
 from google.adk.models.lite_llm import LiteLlm
@@ -47,6 +49,22 @@ def _resolve_model(model: str):
     return model if model.startswith("gemini") else LiteLlm(model=model)
 
 
+def _is_rate_limit(exc: BaseException) -> bool:
+    text = str(exc)
+    return "429" in text or "RESOURCE_EXHAUSTED" in text \
+        or "rate_limit" in text.lower()
+
+
+def _retry_seconds(exc: BaseException, attempt: int) -> float:
+    """Honor the provider's 'retry in Ns' hint when present, else back
+    off exponentially. Free-tier Gemini is 5 requests/minute, so waits
+    in the tens of seconds are normal, not a hang."""
+    match = re.search(r"retry in ([0-9.]+)s", str(exc), re.IGNORECASE)
+    if match:
+        return float(match.group(1)) + 2.0  # small margin past the window
+    return min(15.0 * (2 ** attempt), 120.0)
+
+
 def build_llm_agent(spec: AgentSpec, meter=None,
                     max_output_tokens: int | None = None) -> LlmAgent:
     """Materialize a neutral AgentSpec into an ADK LlmAgent.
@@ -77,6 +95,27 @@ class ADKInvoker:
 
     async def invoke(self, spec: AgentSpec, message: str,
                      max_steps: int = 30) -> Invocation:
+        """Invoke with rate-limit resilience: a 429 anywhere in the run
+        retries the WHOLE invocation after the provider's suggested
+        wait. Safe because agents are stateless invocations — a retry
+        is just a fresh run (store writes are idempotent-by-latest,
+        workspace edits are resumed by the same agent)."""
+        retries = int(os.environ.get("AGENT_RATE_LIMIT_RETRIES", "5"))
+        for attempt in range(retries + 1):
+            try:
+                return await self._invoke_once(spec, message, max_steps)
+            except Exception as exc:  # noqa: BLE001 — filtered below
+                if not _is_rate_limit(exc) or attempt >= retries:
+                    raise
+                delay = _retry_seconds(exc, attempt)
+                print(f"[invoker] {spec.name}: rate-limited (429); "
+                      f"retry {attempt + 1}/{retries} in {delay:.0f}s",
+                      flush=True)
+                await asyncio.sleep(delay)
+        raise RuntimeError("unreachable")
+
+    async def _invoke_once(self, spec: AgentSpec, message: str,
+                           max_steps: int) -> Invocation:
         usage = {"input": 0, "output": 0}
 
         def meter(callback_context, llm_response):

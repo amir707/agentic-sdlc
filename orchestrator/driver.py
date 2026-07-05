@@ -92,7 +92,17 @@ async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
     graph_lines = [f"{module} -> {sorted(deps)}"
                    for module, deps in sorted(graph.items()) if deps]
 
+    # Resume-friendly: state lives in the store, so a crashed or
+    # rate-limited run just reruns — items already assessed are skipped
+    # (no wasted quota, no duplicate work). `make seed` remains the
+    # explicit way to start truly fresh.
+    done = {a["item_id"] for a in await ctx.store.call("list_assessments")}
+
     for item in items:
+        if item["id"] in done:
+            print(f"[assess] {item['id']}: already assessed (skipped)",
+                  flush=True)
+            continue
         print(f"[assess] {item['id']}: {item['title']}", flush=True)
         payload = {
             "task": ("Assess this backlog item and record your judgment via "

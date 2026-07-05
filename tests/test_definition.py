@@ -43,3 +43,47 @@ def test_gate_sits_between_approver_and_release():
     names = [s.name for s in SDLC.per_item]
     assert names.index("approver") < names.index("approval_gate")
     assert "release_manager" in {s.name for s in SDLC.release}
+
+
+def test_assessor_resumes_instead_of_reassessing():
+    """A crashed/rate-limited run reruns without wasting quota: items
+    that already have an assessment are skipped (state lives in the
+    store, so resume is free)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from orchestrator.driver import RunContext, run_risk_assessor
+
+    items = [{"id": "PAY-101", "title": "a"}, {"id": "CAT-201", "title": "b"}]
+    existing = [{"item_id": "PAY-101", "risk": "high", "effort": "M",
+                 "token_estimate": 60000, "recommend_split": 0}]
+
+    async def store_call(tool, **kw):
+        if tool == "list_backlog":
+            return items
+        if tool == "list_assessments":
+            # After the (mocked) invocation, CAT-201 appears too.
+            if store.calls:
+                return existing + [{"item_id": "CAT-201", "risk": "low"}]
+            return existing
+        raise AssertionError(tool)
+
+    store = MagicMock()
+    store.calls = []
+    store.call = AsyncMock(side_effect=store_call)
+    invoker = MagicMock()
+
+    async def fake_invoke(spec, message):
+        store.calls.append(spec.name)
+        from orchestrator.invoker import Invocation
+        return Invocation(text="", input_tokens=1, output_tokens=1)
+
+    ctx = RunContext(project=MagicMock(), store=store, repo_host=MagicMock(),
+                     invoker=MagicMock(invoke=AsyncMock(side_effect=fake_invoke)),
+                     workspace=MagicMock(dir="."))
+    # token metering goes through ctx.invoke -> store.call; stub it out
+    ctx.invoke = fake_invoke
+
+    asyncio.run(run_risk_assessor(ctx))
+    # Only the unassessed item triggered an invocation.
+    assert store.calls == ["risk_assessor"]
