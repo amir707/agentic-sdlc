@@ -207,7 +207,9 @@ async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
             f"claimed_risk: {item['claimed_risk']} | "
             f"claimed_impact: {item['claimed_impact']} | "
             f"area_hint: {item['area_hint']}\n\n{item['description']}")
-    pr = ctx.repo_host.open_pr(branch, item["title"], body)
+    # Title carries the item id; verify later prepends the verified
+    # labels: "[area:payments][risk:high][flag:yes] PAY-101: <title>".
+    pr = ctx.repo_host.open_pr(branch, f"{item['id']}: {item['title']}", body)
     print(f"[coder] PR #{pr} opened for {item['id']}", flush=True)
     return pr
 
