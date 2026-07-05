@@ -7,6 +7,12 @@ operations (branch, commit, push) and PR creation are performed by the
 orchestrator afterwards — the agent cannot touch git, credentials, the
 network, or any path outside the checkout (capability enforcement over
 prompt enforcement).
+
+FAILURE MODE MATTERS: a sandbox refusal is returned to the MODEL as an
+"ERROR: ..." result, never raised — a raised tool exception aborts the
+whole agent run in ADK, whereas an error result lets the model read the
+refusal and self-correct (e.g. it once tried to list .git and killed
+the pipeline).
 """
 
 import subprocess
@@ -35,29 +41,41 @@ def make_workspace_tools(repo_dir: str | Path) -> list:
 
     def list_files(subdir: str = ".") -> list[str]:
         """List files in the workspace (relative paths), recursively."""
-        base = _safe(subdir)
-        return sorted(
-            str(f.relative_to(root)) for f in base.rglob("*")
-            if f.is_file() and ".git" not in f.parts
-            and ".venv" not in f.parts and "__pycache__" not in f.parts)
+        try:
+            base = _safe(subdir)
+            return sorted(
+                str(f.relative_to(root)) for f in base.rglob("*")
+                if f.is_file() and ".git" not in f.parts
+                and ".venv" not in f.parts and "__pycache__" not in f.parts)
+        except (ValueError, OSError) as exc:
+            return [f"ERROR: {exc}"]
 
     def read_file(path: str) -> str:
         """Read one file from the workspace."""
-        return _safe(path).read_text()
+        try:
+            return _safe(path).read_text()
+        except (ValueError, OSError) as exc:
+            return f"ERROR: {exc}"
 
     def write_file(path: str, content: str) -> str:
         """Write one file in the workspace (creates parent directories)."""
-        target = _safe(path, writing=True)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
-        return f"wrote {path} ({len(content)} chars)"
+        try:
+            target = _safe(path, writing=True)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+            return f"wrote {path} ({len(content)} chars)"
+        except (ValueError, OSError) as exc:
+            return f"ERROR: {exc}"
 
     def run_tests() -> str:
         """Run the project's test suite; returns the tail of the output."""
-        proc = subprocess.run(
-            [str(root / ".venv" / "bin" / "python"), "-m", "pytest", "-q"],
-            cwd=root, capture_output=True, text=True, timeout=300)
-        output = (proc.stdout + proc.stderr)[-4000:]
-        return f"exit code {proc.returncode}\n{output}"
+        try:
+            proc = subprocess.run(
+                [str(root / ".venv" / "bin" / "python"), "-m", "pytest", "-q"],
+                cwd=root, capture_output=True, text=True, timeout=300)
+            output = (proc.stdout + proc.stderr)[-4000:]
+            return f"exit code {proc.returncode}\n{output}"
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"ERROR: {exc}"
 
     return [list_files, read_file, write_file, run_tests]

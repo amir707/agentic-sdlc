@@ -40,16 +40,18 @@ def test_workspace_read_write_roundtrip(workspace):
 
 
 def test_workspace_blocks_escape_and_rigging(workspace):
+    """Refusals come back as ERROR results (model feedback), never as
+    exceptions — a raised tool error would abort the whole agent run."""
     tools = make_workspace_tools(workspace)
     write = _tool(tools, "write_file")
-    with pytest.raises(ValueError):
-        write("../outside.txt", "nope")
-    with pytest.raises(ValueError):
-        write(".git/hooks/post-commit", "nope")
-    with pytest.raises(ValueError):
-        write("app/chaos.py", "nope")           # governance rigging
-    with pytest.raises(ValueError):
-        _tool(tools, "read_file")(".git/config")
+    assert write("../outside.txt", "nope").startswith("ERROR:")
+    assert write(".git/hooks/post-commit", "nope").startswith("ERROR:")
+    assert write("app/chaos.py", "nope").startswith("ERROR:")  # rigging
+    assert _tool(tools, "read_file")(".git/config").startswith("ERROR:")
+    listing = _tool(tools, "list_files")(".git")
+    assert listing == [f"ERROR: the .git directory is off limits"]
+    # and none of the refusals actually wrote anything
+    assert not (workspace / "app" / "chaos.py").read_text().startswith("nope")
 
 
 # --- agent specs -------------------------------------------------------------
