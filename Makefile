@@ -24,6 +24,10 @@ orchestrate:
 deploy-baseline:
 	$(PYTHON) -m adapters.deploy baseline
 
+# FULL demo reset: candidate-app main + branches + baseline traffic + store
+reset:
+	bash scripts/reset_demo.sh
+
 demo:
 	bash scripts/demo.sh
 
@@ -47,4 +51,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline demo status watch verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate deploy-baseline reset demo status watch verify-demo adk-web test

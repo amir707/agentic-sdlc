@@ -22,7 +22,13 @@ CREATE TABLE IF NOT EXISTS backlog_items (
     claimed_risk TEXT NOT NULL CHECK (claimed_risk IN ('low', 'medium', 'high')),
     claimed_impact TEXT NOT NULL,
     area_hint TEXT NOT NULL,
-    priority_rank INTEGER NOT NULL
+    priority_rank INTEGER NOT NULL,
+    -- Lifecycle owned by the governor (the PR is the artifact; THIS is
+    -- the truth the orchestrator resumes from): pending -> in_review ->
+    -- verified -> preprod_passed -> awaiting_approval -> queued ->
+    -- released | rejected | escalated | failed
+    status TEXT NOT NULL DEFAULT 'pending',
+    pr INTEGER
 );
 CREATE TABLE IF NOT EXISTS assessments (
     item_id TEXT NOT NULL REFERENCES backlog_items(id),
@@ -111,6 +117,18 @@ def _rows(cursor) -> list[dict]:
 def list_backlog(conn) -> list[dict]:
     return _rows(conn.execute(
         "SELECT * FROM backlog_items ORDER BY priority_rank"))
+
+
+def set_item_status(conn, item_id: str, status: str,
+                    pr: int | None = None) -> dict | None:
+    if pr is None:
+        conn.execute("UPDATE backlog_items SET status = ? WHERE id = ?",
+                     (status, item_id))
+    else:
+        conn.execute("UPDATE backlog_items SET status = ?, pr = ? WHERE id = ?",
+                     (status, pr, item_id))
+    conn.commit()
+    return get_item(conn, item_id)
 
 
 def get_item(conn, item_id: str) -> dict | None:

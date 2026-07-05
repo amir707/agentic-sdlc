@@ -66,6 +66,23 @@ def get_item(item_id: str) -> dict:
 
 
 @mcp.tool()
+def set_item_status(item_id: str, status: str, pr: int | None = None) -> dict:
+    """Record an item's lifecycle transition (and its PR, once known).
+    The orchestrator resumes from THIS status — never from GitHub."""
+    _require("agents")
+    allowed = ("pending", "in_review", "verified", "preprod_passed",
+               "awaiting_approval", "queued", "released", "rejected",
+               "escalated", "failed")
+    if status not in allowed:
+        raise ValueError(f"status must be one of {allowed}")
+    with db.connect() as conn:
+        item = db.set_item_status(conn, item_id, status, pr)
+    if item is None:
+        raise ValueError(f"no backlog item {item_id}")
+    return item
+
+
+@mcp.tool()
 def record_assessment(item_id: str, risk: str, effort: str,
                       token_estimate: int, rationale: str,
                       recommend_split: bool = False,

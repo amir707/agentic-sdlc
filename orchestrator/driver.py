@@ -81,6 +81,13 @@ class RunContext:
         await self.store.call("append_audit", actor=actor,
                               decision=decision, factors=factors)
 
+    async def set_status(self, item_id: str, status: str,
+                         pr: int | None = None) -> None:
+        """Item lifecycle lives in the STORE; the orchestrator resumes
+        from this, never from GitHub (the PR is only the artifact)."""
+        await self.store.call("set_item_status", item_id=item_id,
+                              status=status, pr=pr)
+
 
 def _marker(kind: str, sha: str, extra: str = "") -> str:
     """Idempotency stamp for bot comments (invisible in the GitHub UI).
@@ -292,6 +299,7 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
                          Rejection(pr, "out_of_scope", "author",
                                    verdict.reasoning),
                          actor="code_reviewer")
+            await ctx.set_status(item["id"], "rejected")
             return False
 
         if iteration >= max_iterations:
@@ -303,6 +311,7 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
 
     await ctx.audit("code_reviewer", "escalate_to_human", {
         "pr": pr, "rule": f"no approval after {max_iterations} fix iterations"})
+    await ctx.set_status(item["id"], "escalated")
     print(f"[review] PR #{pr} escalated to human after "
           f"{max_iterations} iterations", flush=True)
     return False
@@ -539,6 +548,7 @@ async def _release_pass_locked(ctx: RunContext) -> None:
             await ctx.store.call("record_deploy", pr=entry.pr,
                                  revision=f"pr-{entry.pr}", traffic="100")
             await ctx.audit("release_manager", "merge_pr", factors)
+            await ctx.set_status(entry.item["id"], "released")
             entry.merged = True
             print(f"[release] MERGED PR #{entry.pr} "
                   f"(traffic -> pr-{entry.pr})", flush=True)
@@ -558,52 +568,75 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     branch = _branch(item)
     print(f"\n=== {item['id']}: {item['title']} ===", flush=True)
 
-    if item["implementation"] == "human":
-        ctx.board.begin(item["id"], "await_human_pr", "team implements")
-        raw = input(f"[human item] {item['id']} is human-implemented; "
-                    "enter PR number when raised: ").strip()
-        pr = int(raw)
-        await ctx.audit("orchestrator", "human_pr",
-                        {"item": item["id"], "pr": pr})
-        ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
-    else:
-        prior = ctx.repo_host.find_pr(branch, state="all")
-        if prior and prior["merged"]:
-            # Resume: this item already shipped in a previous run —
-            # re-implementing a merged change would diff to nothing.
-            print(f"[resume] {item['id']}: PR #{prior['number']} already "
-                  "merged — item complete, skipping", flush=True)
-            ctx.board.finish(item["id"], "already released")
-            return None
-        if prior and prior["state"] == "open":
-            # Resume: an open PR means the coding already happened —
-            # rejoin the pipeline at review instead of re-implementing.
-            pr = prior["number"]
-            print(f"[resume] {item['id']}: open PR #{pr} found — "
-                  "skipping coder, resuming at review", flush=True)
-            await ctx.audit("orchestrator", "resume_pr",
+    # THE STORE decides where this item is in its life — never GitHub
+    # (the PR is the artifact; the store is the truth).
+    status = item.get("status") or "pending"
+    pr = item.get("pr")
+
+    if status == "released":
+        print(f"[resume] {item['id']}: already released — nothing to do",
+              flush=True)
+        return None
+    if status in ("rejected", "escalated", "failed"):
+        print(f"[resume] {item['id']}: status={status} — waiting on a "
+              "human; skipping this run", flush=True)
+        return None
+
+    if pr is None:
+        if item["implementation"] == "human":
+            ctx.board.begin(item["id"], "await_human_pr", "team implements")
+            raw = input(f"[human item] {item['id']} is human-implemented; "
+                        "enter PR number when raised: ").strip()
+            pr = int(raw)
+            await ctx.audit("orchestrator", "human_pr",
                             {"item": item["id"], "pr": pr})
-            ctx.workspace.checkout(branch)
+            ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
         else:
             await run_coder(ctx, item, branch)
             pr = await open_pr(ctx, item, branch)
+        await ctx.set_status(item["id"], "in_review", pr)
+    else:
+        print(f"[resume] {item['id']}: PR #{pr} at status={status}",
+              flush=True)
+        if item["implementation"] == "human":
+            ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
+        else:
+            ctx.workspace.checkout(branch)
+
+    if status == "queued":
+        # Human approval already given (previous run): recompute the
+        # verified labels (cheap, deterministic) and requeue directly —
+        # the gate is NOT asked twice for the same commit.
+        verified = await verify_once(ctx, item, pr)
+        ctx.board.finish(item["id"], "requeued for release")
+        approved = ApprovedPR(pr=pr, item=item, verified=verified)
+        ctx.approved.append(approved)
+        await run_release_pass(ctx)
+        return approved
 
     if not await run_code_reviewer(ctx, item, pr, branch):
         ctx.board.finish(item["id"], "stopped at review")
         return None
     verified = await run_verify(ctx, item, pr, branch)
     if verified is None:
+        await ctx.set_status(item["id"], "escalated")
         ctx.board.finish(item["id"], "stopped at verify (flag)")
         return None
+    await ctx.set_status(item["id"], "verified")
     async with ctx.ci_lock:
         ci_ok = await run_preprod_ci(ctx, item, pr, verified)
     if not ci_ok:
+        await ctx.set_status(item["id"], "failed")
         ctx.board.finish(item["id"], "failed preprod")
         return None
+    await ctx.set_status(item["id"], "preprod_passed")
     baseline = await run_approver(ctx, item, pr, verified)
+    await ctx.set_status(item["id"], "awaiting_approval")
     if not await run_approval_gate(ctx, item, pr, baseline):
+        await ctx.set_status(item["id"], "rejected")
         ctx.board.finish(item["id"], "rejected at gate")
         return None
+    await ctx.set_status(item["id"], "queued")
     ctx.board.finish(item["id"], "queued for release")
     approved = ApprovedPR(pr=pr, item=item, verified=verified)
     ctx.approved.append(approved)

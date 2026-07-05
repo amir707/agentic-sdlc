@@ -2,10 +2,10 @@
 """Human-readable snapshot of the delivery store (read-only).
 
 Layout: the CURRENT story first — the sprint's items with their PR and
-latest status (derived from the audit trail: the item<->PR mapping and
-every stage outcome live there), live workers, open incidents, and this
-sprint's token spend. Below the divider: history, every line carrying
-local time and PR/item ids.
+lifecycle status (both owned by the STORE: backlog_items.status/pr, set
+by the orchestrator at every transition — GitHub is only the artifact),
+live workers, open incidents, and this sprint's token spend. Below the
+divider: history, every line carrying local time and PR/item ids.
 
 Usage: make status   (or: make watch for a self-refreshing view)
 """
@@ -20,6 +20,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mcp_server import db                      # noqa: E402
 from orchestrator.activity import read_board, read_recent_history  # noqa: E402
 
+_LABELS = {
+    "pending": "not started",
+    "in_review": "in review",
+    "verified": "verified (labels applied)",
+    "preprod_passed": "preprod passed",
+    "awaiting_approval": "awaiting gate decision (/approve on the PR)",
+    "queued": "approved — queued for release",
+    "released": "MERGED + released",
+    "rejected": "rejected",
+    "escalated": "escalated to a human",
+    "failed": "failed preprod",
+}
+
 
 def section(title: str) -> None:
     print(f"\n== {title} ==")
@@ -32,7 +45,7 @@ def _elapsed(seconds: float) -> str:
 
 def _local(ts) -> str:
     """Store timestamps are UTC ISO (or epoch floats); render local."""
-    from datetime import datetime, timezone
+    from datetime import datetime
     if ts is None:
         return "-"
     if isinstance(ts, (int, float)):
@@ -42,114 +55,34 @@ def _local(ts) -> str:
     return moment.strftime("%H:%M:%S %Z")
 
 
-def _pr_of(entry: dict):
-    return entry["factors"].get("pr")
-
-
-def _item_pr_map(audit: list[dict]) -> dict[str, int]:
-    """item -> PR from open_pr / resume_pr / human_pr audit events."""
-    mapping: dict[str, int] = {}
-    for entry in audit:
-        if entry["decision"] in ("open_pr", "resume_pr", "human_pr"):
-            mapping[entry["factors"]["item"]] = entry["factors"]["pr"]
-    return mapping
-
-
-def _github_fallback(items: list[dict]) -> dict[str, int]:
-    """PRs opened before the audit mapping existed: resolve them once
-    via the deterministic branch name. Needs GITHUB_TOKEN in env (make
-    exports it); silently skipped when unavailable."""
-    import os
-
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token or not items:
-        return {}
-    try:
-        from adapters.repo_host import GitHubRepoHost
-        from orchestrator.driver import _branch
-
-        repo_line = next(
-            line for line in (Path(__file__).resolve().parent.parent /
-                              "projects-config" / "candidate-app" /
-                              "project.yaml").read_text().splitlines()
-            if line.startswith("repo:"))
-        host = GitHubRepoHost(repo_line.split(":", 1)[1].strip(), token)
-        mapping = {}
-        for item in items:
-            found = host.find_pr(_branch(item), state="all")
-            if found:
-                mapping[item["id"]] = found["number"]
-        return mapping
-    except Exception:
-        return {}  # a status view must never crash on a lookup
-
-
-# Newest matching audit decision wins; order = storyline precedence.
-_STATUS_BY_DECISION = [
-    ("merge_pr", "MERGED + released"),
-    ("hold_merge", "HELD by release manager"),
-    ("reject_pr", None),  # reason filled from factors
-    ("human_approve", "approved — queued for release"),
-    ("human_hold", "gate: on hold"),
-    ("post_dossier", "awaiting gate decision"),
-    ("preprod_result", None),  # passed/failed from factors
-    ("escalate_to_human", "escalated to a human"),
-    ("approve_review", "review approved"),
-    ("escalate_risk_label", "risk escalated by verify"),
-    ("open_pr", "in review"),
-    ("resume_pr", "in review (resumed)"),
-    ("human_pr", "in review (human PR)"),
-]
-
-
-def _item_status(item_id: str, pr: int | None, audit: list[dict],
-                 board: dict | None) -> str:
-    # A live worker beats any recorded state.
+def _item_line(row: dict, board: dict | None) -> str:
     current = (board or {}).get("current", {})
-    if item_id in current:
-        entry = current[item_id]
+    if row["id"] in current:
+        entry = current[row["id"]]
         busy = _elapsed(time.time() - entry["since"])
-        return f"NOW {entry['step']} ({busy}) — {entry['detail']}"
-    if pr is None:
-        return "not started"
-    for entry in reversed(audit):
-        if _pr_of(entry) != pr:
-            continue
-        for decision, label in _STATUS_BY_DECISION:
-            if entry["decision"] == decision:
-                if decision == "reject_pr":
-                    return (f"rejected ({entry['factors'].get('reason_code')}"
-                            f" -> {entry['factors'].get('return_to')})")
-                if decision == "preprod_result":
-                    return "preprod passed" if entry["factors"].get("passed") \
-                        else "preprod FAILED"
-                return label
-    return "in review"
+        status = f"NOW {entry['step']} ({busy}) — {entry['detail']}"
+    else:
+        status = _LABELS.get(row["status"], row["status"])
+    pr_label = f"PR #{row['pr']}" if row["pr"] else "—"
+    return (f"  {row['id']:<9} {pr_label:<7} "
+            f"[{row['implementation']:<5}] {status}")
 
 
 def main() -> None:
     conn = db.connect()
     db.init_schema(conn)
-    audit = db.list_audit(conn)
     board = read_board()
     sprint = db.current_sprint(conn)
-    pr_map = _item_pr_map(audit)
+    backlog = {r["id"]: dict(r) for r in
+               conn.execute("SELECT * FROM backlog_items")}
+    pr_to_item = {r["pr"]: r["id"] for r in backlog.values() if r["pr"]}
 
     # ---------------- CURRENT ----------------
     if sprint:
         section(f"SPRINT #{sprint['id']} — latest status")
-        backlog = {r["id"]: dict(r) for r in
-                   conn.execute("SELECT * FROM backlog_items")}
-        unmapped = [backlog[i] for i in sprint["item_ids"]
-                    if i in backlog and i not in pr_map
-                    and backlog[i]["implementation"] == "agent"]
-        pr_map.update(_github_fallback(unmapped))
         for item_id in sprint["item_ids"]:
-            pr = pr_map.get(item_id)
-            pr_label = f"PR #{pr}" if pr else "—"
-            status = _item_status(item_id, pr, audit, board)
-            impl = backlog.get(item_id, {}).get("implementation", "?")
-            print(f"  {item_id:<9} {pr_label:<7} [{impl:<5}] {status}")
+            if item_id in backlog:
+                print(_item_line(backlog[item_id], board))
         print(f"  rationale: {sprint['rationale'][:110]}")
     else:
         section("SPRINT — none yet")
@@ -197,7 +130,8 @@ def main() -> None:
 
     section("resolved incidents (newest first)")
     resolved = conn.execute(
-        "SELECT * FROM incidents WHERE status='resolved' ORDER BY id DESC").fetchall()
+        "SELECT * FROM incidents WHERE status='resolved' "
+        "ORDER BY id DESC").fetchall()
     for i in resolved:
         print(f"  #{i['id']} {i['area']:<9} opened={_local(i['opened_at'])} "
               f"resolved={_local(i['resolved_at'])}")
@@ -205,16 +139,16 @@ def main() -> None:
         print("  none")
 
     section("deploys (newest first)")
-    pr_to_item = {pr: item for item, pr in pr_map.items()}
     for d in conn.execute("SELECT * FROM deploys ORDER BY id DESC"):
         item = pr_to_item.get(d["pr"], "?")
         print(f"  {_local(d['ts']):<13} {item:<9} PR #{d['pr']:<4} "
               f"{d['revision']:<10} traffic={d['traffic']}")
 
     section("audit tail (last 12, newest first)")
+    audit = db.list_audit(conn)
     for e in reversed(audit[-12:]):
-        ref = f"PR#{_pr_of(e)}" if _pr_of(e) else \
-            e["factors"].get("item", "")
+        pr = e["factors"].get("pr")
+        ref = f"PR#{pr}" if pr else e["factors"].get("item", "")
         print(f"  {_local(e['ts']):<13} #{e['id']:>3} {e['actor']:<16} "
               f"{e['decision']:<26} {ref:<8} "
               f"{json.dumps(e['factors'])[:52]}")

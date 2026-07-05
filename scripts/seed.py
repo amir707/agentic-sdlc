@@ -57,9 +57,11 @@ def main() -> None:
     conn = db.connect()
     db.init_schema(conn)
     conn.executemany(
-        "INSERT INTO backlog_items VALUES "
-        "(:id, :title, :description, :type, :implementation, "
-        " :claimed_risk, :claimed_impact, :area_hint, :priority_rank)",
+        "INSERT INTO backlog_items (id, title, description, type, "
+        "implementation, claimed_risk, claimed_impact, area_hint, "
+        "priority_rank) VALUES (:id, :title, :description, :type, "
+        ":implementation, :claimed_risk, :claimed_impact, :area_hint, "
+        ":priority_rank)",
         items)
     conn.commit()
     print(f"seeded {len(items)} backlog items into {path}")

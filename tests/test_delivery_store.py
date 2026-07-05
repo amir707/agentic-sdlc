@@ -39,10 +39,22 @@ def server(tmp_path_factory):
         "MCP_TOKEN_MONITOR": TOKENS["monitor"],
         "MCP_TOKEN_RESOLVER": TOKENS["resolver"],
     }
+    # Fail LOUDLY if a stale server squats on the port: connecting to a
+    # leftover process (empty temp DB) once made every test lie.
+    try:
+        socket.create_connection(("127.0.0.1", PORT), timeout=0.2).close()
+        raise RuntimeError(
+            f"port {PORT} already in use — kill the stale test server "
+            "(pkill -f mcp_server.server on 8899) and rerun")
+    except OSError:
+        pass
+
     proc = subprocess.Popen(
         [sys.executable, "-m", "mcp_server.server"], cwd=ROOT, env=env)
     deadline = time.time() + 15
     while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError("delivery-store server exited at startup")
         try:
             socket.create_connection(("127.0.0.1", PORT), timeout=0.2).close()
             break
@@ -52,25 +64,30 @@ def server(tmp_path_factory):
         proc.terminate()
         raise RuntimeError("delivery-store server did not start")
 
-    # Seed backlog directly through the repository layer.
-    sys.path.insert(0, str(ROOT))
-    from mcp_server import db
-    os.environ["DELIVERY_STORE_DB"] = str(db_file)
-    items = json.loads(
-        (ROOT / "projects-config" / "candidate-app" / "backlog.json").read_text())
-    conn = db.connect()
-    db.init_schema(conn)
-    conn.executemany(
-        "INSERT INTO backlog_items VALUES "
-        "(:id, :title, :description, :type, :implementation, "
-        " :claimed_risk, :claimed_impact, :area_hint, :priority_rank)",
-        items)
-    conn.commit()
-    conn.close()
-
-    yield URL
-    proc.terminate()
-    proc.wait(timeout=5)
+    # Seed backlog directly through the repository layer. Everything
+    # from here runs under try/finally: a seeding crash must still
+    # terminate the server (an orphan once poisoned every later run).
+    try:
+        sys.path.insert(0, str(ROOT))
+        from mcp_server import db
+        os.environ["DELIVERY_STORE_DB"] = str(db_file)
+        items = json.loads(
+            (ROOT / "projects-config" / "candidate-app" / "backlog.json").read_text())
+        conn = db.connect()
+        db.init_schema(conn)
+        conn.executemany(
+            "INSERT INTO backlog_items (id, title, description, type, "
+            "implementation, claimed_risk, claimed_impact, area_hint, "
+            "priority_rank) VALUES (:id, :title, :description, :type, "
+            ":implementation, :claimed_risk, :claimed_impact, :area_hint, "
+            ":priority_rank)",
+            items)
+        conn.commit()
+        conn.close()
+        yield URL
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
 
 
 async def _call(role: str, tool: str, args: dict | None = None):
@@ -176,3 +193,29 @@ async def test_sprint_roundtrip(server):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_item_lifecycle_is_store_owned(server):
+    """The orchestrator resumes from backlog_items.status/pr — set via
+    the agents role, validated, and readable by everyone."""
+    updated = _payload(await _call("agents", "set_item_status",
+                                   {"item_id": "PAY-101",
+                                    "status": "in_review", "pr": 42}))
+    assert updated["status"] == "in_review" and updated["pr"] == 42
+
+    # status-only update keeps the recorded PR
+    updated = _payload(await _call("agents", "set_item_status",
+                                   {"item_id": "PAY-101",
+                                    "status": "released"}))
+    assert updated["status"] == "released" and updated["pr"] == 42
+
+    # unknown lifecycle values are rejected
+    result = await _call("agents", "set_item_status",
+                         {"item_id": "PAY-101", "status": "shipped-ish"})
+    assert result.isError
+
+    # writes are agents-role only
+    result = await _call("monitor", "set_item_status",
+                         {"item_id": "PAY-101", "status": "pending"})
+    assert result.isError

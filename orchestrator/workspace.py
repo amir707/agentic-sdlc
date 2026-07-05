@@ -43,6 +43,7 @@ class Workspace:
     def diff_against(self, base: str = "main") -> str:
         return self._git("diff", f"origin/{base}...HEAD")
 
+
     def has_changes(self) -> bool:
         return bool(self._git("status", "--porcelain"))
 

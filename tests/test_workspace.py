@@ -94,3 +94,4 @@ def test_base_workspace_still_works_sequentially(repos):
     sha = ws.commit_all("CORE-302: build metadata")
     assert len(sha) == 40
     assert "health.py" in ws.diff_against("main")
+
