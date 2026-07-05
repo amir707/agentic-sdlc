@@ -1,6 +1,6 @@
 # Synthetic monitor + incident resolver policy (deterministic workers).
 # Override per project at
-# config/projects/<name>/sdlc_steps/monitor/policy.yaml.
+# projects-config/<name>/sdlc_steps/monitor/policy.yaml.
 # Demo-small windows keep incident open/resolve cycles at seconds for
 # fast iteration; production values would be minutes.
 

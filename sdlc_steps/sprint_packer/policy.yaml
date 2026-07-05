@@ -1,6 +1,6 @@
 # Sprint packing constraints (deterministic solver step).
 # Override per project at
-# config/projects/<name>/sdlc_steps/sprint_packer/policy.yaml.
+# projects-config/<name>/sdlc_steps/sprint_packer/policy.yaml.
 
 # Risk budget in points: mediums cost 1, highs 2, cap 2 — so two
 # mediums OR one high per sprint, never both.

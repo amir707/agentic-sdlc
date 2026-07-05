@@ -73,7 +73,7 @@ target, chaos config token).
 ```bash
 cd agentic-sdlc
 cp .env.example .env
-cp config/projects/candidate-app/.env.example config/projects/candidate-app/.env
+cp projects-config/candidate-app/.env.example projects-config/candidate-app/.env
 # generate the three MCP role tokens (system .env) + chaos config token
 # (project .env):
 python3 - <<'EOF'
@@ -90,7 +90,7 @@ EOF
 
 ```bash
 cd agentic-sdlc
-set -a; source .env; source config/projects/candidate-app/.env; set +a
+set -a; source .env; source projects-config/candidate-app/.env; set +a
 .venv/bin/python -m adapters.deploy baseline  # gcloud run deploy --source
 .venv/bin/python -m adapters.deploy url       # print the live URL
 curl "$(.venv/bin/python -m adapters.deploy url)/health"

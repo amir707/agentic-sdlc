@@ -3,8 +3,9 @@ __pycache__/
 .venv/
 .pytest_cache/
 .env
-config/projects/*/.env
+projects-config/*/.env
 delivery_store.sqlite3*
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+temp-*.md

@@ -14,7 +14,7 @@ Project" (Agents for Business track). The SDLC runtime and its integrations are 
 the governed service lives in its own repo:
 [candidate-app](https://github.com/amir707/candidate-app) — agents open
 real PRs there — and everything specific to it lives under
-`config/projects/candidate-app/`.
+`projects-config/candidate-app/`.
 
 ## Three ideas to steal
 
@@ -51,7 +51,7 @@ orchestrator/     the SDLC process runtime: definition.py (the pipeline as data)
                   driver.py (sequential executor), and execution mechanics
                   (config overlays, invoker, git workspace, approval gate,
                   rejection, dependency graph, agent helpers)
-config/projects/  one folder per governed project: project.yaml (repo,
+projects-config/  one folder per governed project: project.yaml (repo,
                   areas, smoke endpoints), backlog.json (seed), .env
                   (project tokens, gitignored), and sdlc_steps/<step>/
                   overlays (customised-prompt.md, policy.yaml) mirroring
@@ -67,7 +67,7 @@ docs/             architecture, invariants, ADRs, setup runbook
 
 Composition per invocation: base `sdlc_steps/<step>/prompts.md` (opens
 with immutable core rules) → project
-`config/projects/<name>/sdlc_steps/<step>/customised-prompt.md` if
+`projects-config/<name>/sdlc_steps/<step>/customised-prompt.md` if
 present (extends, never overrides) → task payload. Policy resolves the
 same way: step defaults (plus shared `sdlc_steps/policy.yaml`) merged
 with the project's mirrored overrides.

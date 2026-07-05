@@ -57,7 +57,7 @@ def server(tmp_path_factory):
     from mcp_server import db
     os.environ["DELIVERY_STORE_DB"] = str(db_file)
     items = json.loads(
-        (ROOT / "config" / "projects" / "candidate-app" / "backlog.json").read_text())
+        (ROOT / "projects-config" / "candidate-app" / "backlog.json").read_text())
     conn = db.connect()
     db.init_schema(conn)
     conn.executemany(

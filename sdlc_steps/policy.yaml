@@ -1,5 +1,5 @@
 # Common policy defaults shared by more than one step. A project may
-# override any key at config/projects/<name>/sdlc_steps/policy.yaml.
+# override any key at projects-config/<name>/sdlc_steps/policy.yaml.
 # The test for what is policy: if it could change next quarter by team
 # decision, it is policy — read by deterministic tools, referenced by
 # prompts by NAME, values never copied into prose.

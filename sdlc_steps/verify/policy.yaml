@@ -1,6 +1,6 @@
 # Verify + label step policy (deterministic step; risk recomputation
 # rules). Override per project at
-# config/projects/<name>/sdlc_steps/verify/policy.yaml.
+# projects-config/<name>/sdlc_steps/verify/policy.yaml.
 
 # Areas whose request paths make a change AT LEAST medium risk when the
 # diff's dependency closure touches them — regardless of what the item

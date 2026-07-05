@@ -5,7 +5,7 @@ PYTHON ?= .venv/bin/python
 PROJECT ?= candidate-app
 
 include .env
--include config/projects/$(PROJECT)/.env
+-include projects-config/$(PROJECT)/.env
 export
 
 seed:

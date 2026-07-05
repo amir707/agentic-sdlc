@@ -2,7 +2,7 @@
 graph, diff analysis, sprint packer.
 
 The packer test mirrors the seeded demo scenario end to end: given the
-intended assessments for config/projects/candidate-app/backlog.json,
+intended assessments for projects-config/candidate-app/backlog.json,
 the packed sprint and every named refusal must come out exactly as the
 demo script expects.
 """
@@ -146,7 +146,7 @@ def _assessment(risk, effort, tokens, split=False, reason=None):
 def test_pack_matches_seeded_demo_scenario():
     """The demo's expected outcome, end to end, with intended assessments."""
     items = json.loads(
-        (ROOT / "config" / "projects" / "candidate-app" / "backlog.json").read_text())
+        (ROOT / "projects-config" / "candidate-app" / "backlog.json").read_text())
     assessments = {
         "PAY-101": _assessment("high", "M", 60000),
         "CAT-201": _assessment("low", "S", 30000),

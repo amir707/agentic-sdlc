@@ -67,7 +67,7 @@ system-owned, open with immutable core rules) · step policy defaults
 (`sdlc_steps/<step>/policy.yaml`; cross-step keys in
 `sdlc_steps/policy.yaml`; pipeline flow control in
 `sdlc_steps/orchestrator/policy.yaml`) · project overlays mirroring the
-same hierarchy (`config/projects/<name>/sdlc_steps/<step>/` —
+same hierarchy (`projects-config/<name>/sdlc_steps/<step>/` —
 customised-prompt.md extends prompts, policy.yaml overrides numbers) ·
 ADRs (for humans, never injected).
 

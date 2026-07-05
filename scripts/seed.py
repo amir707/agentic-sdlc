@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--project", default="candidate-app",
                         help="project name under config/")
     args = parser.parse_args()
-    seed_file = ROOT / "config" / "projects" / args.project / "backlog.json"
+    seed_file = ROOT / "projects-config" / args.project / "backlog.json"
     path = db.db_path()
     for suffix in ("", "-wal", "-shm"):
         try:

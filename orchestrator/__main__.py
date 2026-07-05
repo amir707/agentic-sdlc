@@ -16,7 +16,7 @@ def main() -> None:
 
     # Engine secrets first, then the project's own.
     load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / "config" / "projects" / args.project / ".env")
+    load_dotenv(ROOT / "projects-config" / args.project / ".env")
 
     from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_pipeline
