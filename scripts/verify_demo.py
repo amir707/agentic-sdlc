@@ -127,11 +127,7 @@ def main() -> int:
                 items == ["PAY-101", "CAT-201", "PAY-102", "CAT-202"],
                 f"sprint is exactly the seeded plan (got {items})")
         expected_refusals = {"CORE-301": "recommend_split",
-                            "PAY-103": "risk_budget",
-                            "CAT-203": "risk_budget",
-                            "CORE-303": "risk_budget",
-                            "CORE-302": "token_budget",
-                            "CAT-204": "token_budget"}
+                            "PAY-103": "risk_budget"}
         actual = {r["factors"]["item"]: r["factors"]["constraint"]
                   for r in refusals}
         for item, constraint in expected_refusals.items():

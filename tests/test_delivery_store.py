@@ -115,7 +115,7 @@ def _payload(result):
 async def test_backlog_seeded(server):
     result = await _call("agents", "list_backlog")
     items = _payload(result)
-    assert len(items) == 10
+    assert len(items) == 6
     assert items[0]["id"] == "PAY-101"  # ordered by priority rank
 
 

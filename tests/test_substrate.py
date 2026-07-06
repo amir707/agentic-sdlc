@@ -151,14 +151,10 @@ def test_pack_matches_seeded_demo_scenario():
         "PAY-101": _assessment("high", "M", 60000),
         "CAT-201": _assessment("low", "S", 30000),
         "PAY-102": _assessment("low", "S", 30000),   # the trap item: believed low until verify
-        "CAT-202": _assessment("low", "S", 30000),   # human: zero tokens
+        "CAT-202": _assessment("low", "S", 30000),
         "CORE-301": _assessment("medium", "L", 120000, split=True,
                                 reason="L effort at medium risk"),
         "PAY-103": _assessment("high", "M", 60000),
-        "CAT-203": _assessment("medium", "M", 60000),
-        "CORE-302": _assessment("low", "S", 30000),
-        "CAT-204": _assessment("low", "S", 30000),
-        "CORE-303": _assessment("medium", "M", 60000),
     }
     project = load_project("candidate-app")
     result = pack(items, assessments, project.policy("sprint_packer"))
@@ -166,14 +162,10 @@ def test_pack_matches_seeded_demo_scenario():
     assert [i["id"] for i in result.selected] == \
         ["PAY-101", "CAT-201", "PAY-102", "CAT-202"]
 
+    # tokens: 60k+30k+30k+30k = the full 150k; risk: 2+0+0+0 = the cap
     by_id = {r.item_id: r.constraint for r in result.refused}
     assert by_id["CORE-301"] == "recommend_split"      # demo beat 1a
     assert by_id["PAY-103"] == "risk_budget"           # demo beat 1b (high after high)
-    assert by_id["CAT-203"] == "risk_budget"           # medium, 0 points left
-    assert by_id["CORE-303"] == "risk_budget"
-    # tokens: 60k+30k+30k+30k = the full 150k -> nothing left for these
-    assert by_id["CORE-302"] == "token_budget"
-    assert by_id["CAT-204"] == "token_budget"
 
 
 def test_human_items_cost_no_tokens():

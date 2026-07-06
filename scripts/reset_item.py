@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reset ONE item for replay — the surgical alternative to make reset.
+"""Reset ONE item for replay — the surgical alternative to make reset-demo.
 
 Clears the item's store lifecycle (status -> pending, PR unlinked),
 closes its open PR, deletes its branch, and removes its worktree, so a
@@ -7,12 +7,12 @@ rerun of the orchestrator replays the item from coding onward while the
 rest of the world stays put. The assessment is kept (the sprint's
 composition should not change) unless --with-assessment.
 
-MERGED items are refused by default: their change already lives in
-main, so a replay would diff against itself — use `make reset` for a
-true world replay, or --force if you know what you are doing.
+MERGED items ask for confirmation first: their change already lives in
+main, so the replayed coder diffs against itself and may produce an
+empty PR. `make reset-demo` is the true world replay.
 
 Usage: make reset-item ITEM=PAY-102
-       (python scripts/reset_item.py --item PAY-102 [--with-assessment] [--force])
+       (python scripts/reset_item.py --item PAY-102 [--with-assessment])
 """
 
 import argparse
@@ -38,8 +38,6 @@ def main() -> None:
     parser.add_argument("--project", default="candidate-app")
     parser.add_argument("--with-assessment", action="store_true",
                         help="also delete the item's assessment")
-    parser.add_argument("--force", action="store_true",
-                        help="reset even if the item's PR was merged")
     args = parser.parse_args()
 
     conn = db.connect()
@@ -55,10 +53,13 @@ def main() -> None:
     # --- GitHub side: PR + branch -------------------------------------
     closed_pr = None
     prior = host.find_pr(branch, state="all")
-    if prior and prior["merged"] and not args.force:
-        sys.exit(f"{args.item}: PR #{prior['number']} was MERGED — its "
-                 "change is in main, so a replay would diff to nothing. "
-                 "Use `make reset` for a world replay, or --force.")
+    if prior and prior["merged"]:
+        answer = input(
+            f"PR #{prior['number']} was MERGED — its change is already in "
+            "main, so the replay may diff to nothing (revert it in the "
+            "repo first for a real replay). Proceed? [y/N] ")
+        if answer.strip().lower() not in ("y", "yes"):
+            sys.exit("aborted — nothing changed")
     if prior and prior["state"] == "open":
         host.close_pr(prior["number"])
         closed_pr = prior["number"]

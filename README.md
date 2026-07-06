@@ -89,7 +89,7 @@ GCP APIs, seeds the store). Then, in separate terminals:
 
 | Command | What it does |
 |---|---|
-| `make reset` | full world reset: governed repo to baseline, branches deleted, baseline redeployed, store reseeded |
+| `make reset-demo` | full world reset: governed repo to baseline, branches deleted, baseline redeployed, store reseeded |
 | `make mcp` | the delivery-store MCP server (localhost, per-role bearer tokens) |
 | `make monitor` | synthetic prober against the live Cloud Run URL |
 | `make orchestrate [PARALLEL=2]` | the pipeline; gates pause for `/approve` comments on the PRs |

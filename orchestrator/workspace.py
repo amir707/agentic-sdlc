@@ -47,10 +47,11 @@ class Workspace:
         self._git("checkout", "-f", "--detach", "FETCH_HEAD")
         self._git("clean", "-fd", "-e", ".venv")
 
-    def checkout(self, branch: str) -> None:
-        self._git("fetch", "origin", branch)
-        self._git("checkout", "-f", branch)
-        self._git("reset", "--hard", f"origin/{branch}")
+    def detach(self) -> None:
+        """Release whatever branch this checkout holds (HEAD stays on
+        the same commit). A branch checked out here is locked against
+        every worktree — the base must let go before items fan out."""
+        self._git("checkout", "--detach")
 
     def diff_against(self, base: str = "main") -> str:
         return self._git("diff", f"origin/{base}...HEAD")

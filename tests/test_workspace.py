@@ -173,3 +173,30 @@ def test_commit_all_with_real_gitignored_venv_dir(repos):
     tracked = _git(base, "ls-files")
     assert not any(t.startswith(".venv") for t in tracked.split())
     assert "work.py" in tracked
+
+def test_worktree_resumes_branch_held_by_base_checkout(repos):
+    """Regression: a crashed sequential run left the BASE checkout on an
+    item branch; the parallel rerun's worktree then died trying to
+    check the same branch out (git allows a branch in ONE worktree).
+    Resume materializes heads detached, and the base can detach()."""
+    origin, base = repos
+    ws = Workspace(base)
+    ws.start_branch("item/CAT-201-x")            # crashed run's leftover
+    (ws.dir / "work.py").write_text("x = 1\n")
+    ws.commit_all("CAT-201: work")
+    ws.push("item/CAT-201-x", str(origin))
+
+    worktree = WorkspaceFactory(base).for_item("CAT-201")
+    worktree.checkout_detached("item/CAT-201-x")  # old checkout(): 128
+    assert (worktree.dir / "work.py").exists()
+
+    # A fix round still works detached end-to-end: commit + push by ref.
+    (worktree.dir / "work.py").write_text("x = 2\n")
+    worktree.commit_all("CAT-201: fix")
+    worktree.push("item/CAT-201-x", str(origin))
+    assert "x = 2" in _git(origin, "show", "item/CAT-201-x:work.py")
+
+    # detach() frees the base's branch so a worktree may recreate it.
+    ws.detach()
+    worktree.start_branch("item/CAT-201-x")
+    assert _git(base, "branch", "--show-current") == ""

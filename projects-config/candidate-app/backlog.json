@@ -64,49 +64,5 @@
     "claimed_impact": "medium",
     "area_hint": "payments",
     "priority_rank": 6
-  },
-  {
-    "id": "CAT-203",
-    "title": "Paginate the catalog items listing",
-    "description": "Wrap GET /catalog/items in a pagination envelope (items, page, page_size, total) with page/page_size query parameters. Changes the response shape existing clients parse.",
-    "type": "story",
-    "implementation": "agent",
-    "claimed_risk": "medium",
-    "claimed_impact": "medium",
-    "area_hint": "catalog",
-    "priority_rank": 7
-  },
-  {
-    "id": "CORE-302",
-    "title": "Expand health endpoint with build metadata",
-    "description": "Add version and build timestamp fields to GET /health so operators can confirm which build is serving. Read the values from environment variables with safe defaults.",
-    "type": "story",
-    "implementation": "agent",
-    "claimed_risk": "low",
-    "claimed_impact": "low",
-    "area_hint": "core",
-    "priority_rank": 8
-  },
-  {
-    "id": "CAT-204",
-    "title": "Support substring search on catalog items",
-    "description": "Add an optional q query parameter to GET /catalog/items that filters items to names containing the substring, case-insensitive. Additive; default behavior unchanged.",
-    "type": "story",
-    "implementation": "agent",
-    "claimed_risk": "low",
-    "claimed_impact": "low",
-    "area_hint": "catalog",
-    "priority_rank": 9
-  },
-  {
-    "id": "CORE-303",
-    "title": "Structured JSON request logging",
-    "description": "Add middleware that logs one structured JSON line per request (method, path, status, latency). Applies to every route in the service.",
-    "type": "story",
-    "implementation": "agent",
-    "claimed_risk": "medium",
-    "claimed_impact": "medium",
-    "area_hint": "core",
-    "priority_rank": 10
   }
 ]

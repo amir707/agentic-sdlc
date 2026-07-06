@@ -5,7 +5,7 @@ The local checkout is a CACHE of GitHub state, so the engine builds it
 for itself: cloned on demand into a scratch directory, healed when
 missing or broken, reused while a run is resuming, and DELETED when a
 run completes cleanly (a crashed run leaves it in place so resume is
-instant; `make reset` clears it too). Nothing precious ever lives here.
+instant; `make reset-demo` clears it too). Nothing precious ever lives here.
 
 Locations: $AGENTIC_SDLC_SCRATCH, else <system tmp>/agentic-sdlc/, as
 <project>/checkout. CANDIDATE_APP_DIR (project .env) optionally pins

@@ -717,7 +717,8 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
             pr = int(raw)
             await ctx.audit("orchestrator", "human_pr",
                             {"item": item["id"], "pr": pr})
-            ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
+            ctx.workspace.checkout_detached(
+                ctx.repo_host.get_pr(pr)["head_ref"])
         else:
             await run_coder(ctx, item, branch)
             pr = await open_pr(ctx, item, branch)
@@ -725,10 +726,15 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     else:
         print(f"[resume] {item['id']}: PR #{pr} at status={status}",
               flush=True)
+        # Detached: the branch may be held by another checkout (the
+        # base, after a crashed sequential run) — a branch can only be
+        # checked out in ONE worktree, and nothing here needs the name
+        # (commits work detached; push targets the branch by refspec).
         if item["implementation"] == "human":
-            ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
+            ctx.workspace.checkout_detached(
+                ctx.repo_host.get_pr(pr)["head_ref"])
         else:
-            ctx.workspace.checkout(branch)
+            ctx.workspace.checkout_detached(branch)
 
     # CONFLICTS ARE HUMAN WORK: the coder is never asked to reconcile
     # parallel changes from main (it once "fixed" flags.json into
@@ -814,6 +820,7 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
         # Human items stay sequential: they block on terminal input.
         agent_items = [i for i in selected if i["implementation"] == "agent"]
         human_items = [i for i in selected if i["implementation"] == "human"]
+        ctx.workspace.detach()  # free any branch a crashed run held
         factory = WorkspaceFactory(ctx.workspace.dir)
         limit = asyncio.Semaphore(parallel)
 

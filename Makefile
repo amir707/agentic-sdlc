@@ -26,7 +26,7 @@ deploy-baseline:
 	  $(PYTHON) -m adapters.deploy baseline
 
 # FULL demo reset: candidate-app main + branches + baseline traffic + store
-reset:
+reset-demo:
 	bash scripts/reset_demo.sh
 
 # surgical replay of ONE item: make reset-item ITEM=PAY-102
@@ -57,4 +57,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline reset reset-item demo status watch verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate deploy-baseline reset-demo reset-item demo status watch verify-demo adk-web test
