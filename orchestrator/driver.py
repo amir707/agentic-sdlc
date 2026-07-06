@@ -191,15 +191,19 @@ async def run_coder(ctx: RunContext, item: dict, branch: str,
     payload = {"task": task, "item": item, "feedback": feedback,
                "flag_policy_min_risk":
                    ctx.project.policy("verify")["flag_required_min_risk"]}
-    await ctx.invoke(coder_spec.build(ctx.project, str(ctx.workspace.dir)),
-                     json.dumps(payload, indent=2))
+    result = await ctx.invoke(
+        coder_spec.build(ctx.project, str(ctx.workspace.dir)),
+        json.dumps(payload, indent=2))
 
     if not ctx.workspace.has_changes():
         if feedback is None:
             raise RuntimeError(f"coder produced no changes for {item['id']}")
-        return  # a fix round may legitimately end with reasoning only
+        # A fix round with no code change is a DISAGREEMENT, not a fix —
+        # the caller decides what to do with it (impasse -> human).
+        return False, result.text
     ctx.workspace.commit_all(f"{item['id']}: {item['title']}")
     ctx.workspace.push(branch, ctx.repo_host.authenticated_remote())
+    return True, result.text
 
 
 async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
@@ -306,8 +310,22 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
             break
         print(f"[review] PR #{pr} changes requested "
               f"(iteration {iteration + 1}); coder fixing", flush=True)
-        await run_coder(ctx, item, branch,
-                        feedback=verdict.model_dump_json(indent=2))
+        changed, reply = await run_coder(
+            ctx, item, branch, feedback=verdict.model_dump_json(indent=2))
+        if not changed:
+            # Impasse: reviewer demanded changes, coder declined. Put
+            # the disagreement ON THE ARTIFACT and hand it to a human —
+            # re-reviewing an identical diff resolves nothing.
+            ctx.repo_host.post_comment(pr, (
+                "**Coder response (no code changes made)**\n\n"
+                f"{reply or '(no reasoning returned)'}"))
+            await ctx.audit("code_reviewer", "escalate_to_human", {
+                "pr": pr, "rule": "coder declined the requested changes "
+                                  "(no-change fix round)"})
+            await ctx.set_status(item["id"], "escalated")
+            print(f"[review] PR #{pr} impasse: coder declined changes — "
+                  "escalated to a human", flush=True)
+            return False
 
     await ctx.audit("code_reviewer", "escalate_to_human", {
         "pr": pr, "rule": f"no approval after {max_iterations} fix iterations"})
