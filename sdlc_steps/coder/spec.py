@@ -15,9 +15,10 @@ from orchestrator.invoker import AgentSpec
 
 
 def build(project: ProjectConfig, workspace_dir: str) -> AgentSpec:
+    protected = tuple(project.policy("coder").get("protected_paths", []))
     return AgentSpec(
         name="coder",
         instruction=project.prompt("coder"),
         model=os.environ.get("CODER_MODEL", "anthropic/claude-sonnet-5"),
-        tools=make_workspace_tools(workspace_dir),
+        tools=make_workspace_tools(workspace_dir, protected),
     )

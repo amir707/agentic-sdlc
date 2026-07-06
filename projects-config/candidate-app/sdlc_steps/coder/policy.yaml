@@ -1,0 +1,4 @@
+# Paths the coder may never write in THIS project (capability-level
+# backstop for the demo/governance rigging; also stated in its prompt).
+protected_paths:
+  - app/chaos.py

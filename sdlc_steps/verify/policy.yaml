@@ -5,8 +5,9 @@
 # Areas whose request paths make a change AT LEAST medium risk when the
 # diff's dependency closure touches them — regardless of what the item
 # claimed. This is the claimed-vs-actual guardrail's floor rule.
-sensitive_areas:
-  - payments
+# ENGINE DEFAULT IS EMPTY: which areas are sensitive is project
+# knowledge — set it in projects-config/<name>/sdlc_steps/verify/.
+sensitive_areas: []
 
 # A closure spanning at least this many modules is a wide blast radius:
 # floor medium.

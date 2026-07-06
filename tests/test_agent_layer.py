@@ -41,8 +41,10 @@ def test_workspace_read_write_roundtrip(workspace):
 
 def test_workspace_blocks_escape_and_rigging(workspace):
     """Refusals come back as ERROR results (model feedback), never as
-    exceptions — a raised tool error would abort the whole agent run."""
-    tools = make_workspace_tools(workspace)
+    exceptions — a raised tool error would abort the whole agent run.
+    Protected paths are PROJECT policy, passed in — not engine
+    knowledge."""
+    tools = make_workspace_tools(workspace, ("app/chaos.py",))
     write = _tool(tools, "write_file")
     assert write("../outside.txt", "nope").startswith("ERROR:")
     assert write(".git/hooks/post-commit", "nope").startswith("ERROR:")
@@ -123,7 +125,7 @@ def _github_mock(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text="diff --git a/x b/x")
         return httpx.Response(200, json={
             "number": 7, "title": "t", "body": "Item: PAY-101",
-            "state": "open", "merged": False,
+            "state": "open", "merged": False, "mergeable": True,
             "head": {"ref": "item/PAY-101-refund-totals", "sha": "abc123"}})
     if path.endswith("/issues/7/comments") and method == "GET":
         return httpx.Response(200, json=[
@@ -204,3 +206,16 @@ def test_gemini_requests_are_paced():
         return time.monotonic() - start
 
     assert asyncio.run(disabled()) < 0.05    # GEMINI_RPM=0 -> no pacing
+
+
+def test_delete_branch_is_idempotent():
+    def mock(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE" and "git/refs/heads" in request.url.path:
+            return httpx.Response(
+                204 if "exists" in request.url.path else 404)
+        return httpx.Response(500)
+
+    host = GitHubRepoHost("amir707/candidate-app", "t",
+                          transport=httpx.MockTransport(mock))
+    host.delete_branch("item/exists-x")       # 204: deleted
+    host.delete_branch("item/already-gone")   # 404: fine, idempotent

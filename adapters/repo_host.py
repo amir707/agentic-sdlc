@@ -95,7 +95,16 @@ class GitHubRepoHost:
         return {"number": data["number"], "title": data["title"],
                 "body": data["body"] or "", "state": data["state"],
                 "head_ref": data["head"]["ref"], "head_sha": data["head"]["sha"],
-                "merged": data.get("merged", False)}
+                "merged": data.get("merged", False),
+                # True/False once GitHub computed it; None while pending
+                "mergeable": data.get("mergeable")}
+
+    def delete_branch(self, head: str) -> None:
+        """Delete a remote branch; already-gone is fine (idempotent)."""
+        resp = self.client.delete(f"/git/refs/heads/{head}")
+        if resp.status_code not in (204, 404, 422):
+            raise RepoHostError(
+                f"DELETE refs/heads/{head}: {resp.status_code}")
 
     def close_pr(self, pr: int) -> None:
         self._check(self.client.patch(f"/pulls/{pr}", json={"state": "closed"}))

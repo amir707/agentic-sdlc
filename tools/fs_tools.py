@@ -18,14 +18,13 @@ the pipeline).
 import subprocess
 from pathlib import Path
 
-# Paths the coder may never write: version control and the governed
-# project's governance rigging (also stated in its core rules; this is
-# the capability-level backstop).
-_WRITE_DENYLIST = (".git", "app/chaos.py")
-
-
-def make_workspace_tools(repo_dir: str | Path) -> list:
+def make_workspace_tools(repo_dir: str | Path,
+                         protected_paths: tuple[str, ...] = ()) -> list:
+    """protected_paths: project-owned write-denylist (from the coder
+    step policy) — the engine knows nothing about any project's layout;
+    only .git is engine-enforced (universal)."""
     root = Path(repo_dir).resolve()
+    denylist = (".git",) + tuple(protected_paths)
 
     def _safe(path: str, writing: bool = False) -> Path:
         resolved = (root / path).resolve()
@@ -33,7 +32,7 @@ def make_workspace_tools(repo_dir: str | Path) -> list:
             raise ValueError(f"path escapes the workspace: {path}")
         rel = str(resolved.relative_to(root))
         if writing and any(rel == d or rel.startswith(d + "/")
-                           for d in _WRITE_DENYLIST):
+                           for d in denylist):
             raise ValueError(f"writing to {rel} is not permitted")
         if ".git" in resolved.parts:
             raise ValueError("the .git directory is off limits")

@@ -16,6 +16,9 @@ reviewer requests changes, you read the comments, fix, and reply.
   drive-by refactors, dependency bumps, or unrelated fixes; the
   reviewer rejects out-of-scope PRs.
 - Never weaken or delete existing tests to make a change pass.
+- You NEVER resolve merge conflicts or reconcile parallel changes from
+  main. If files look inconsistent with changes you did not make, say
+  so and stop — conflicted branches are handed to a human.
 
 ## Workflow
 

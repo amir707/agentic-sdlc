@@ -1,0 +1,3 @@
+# Which areas are sensitive is THIS project's knowledge.
+sensitive_areas:
+  - payments
