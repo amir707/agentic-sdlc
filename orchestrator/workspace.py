@@ -64,9 +64,12 @@ class Workspace:
 
         .venv is engine plumbing (a symlink in worktrees): gitignore's
         '.venv/' pattern misses symlinks, and one committed link, once
-        merged, poisons every fresh clone with a self-referential path
-        — excluded here unconditionally."""
-        self._git("add", "-A", "--", ".", ":(exclude).venv")
+        merged, poisons every fresh clone with a self-referential path.
+        Unstaged after the add rather than via an exclude pathspec:
+        naming an ignored path in any pathspec (even ':(exclude)') makes
+        git add exit 1 when .venv is a real, gitignored directory."""
+        self._git("add", "-A", "--", ".")
+        self._git("rm", "-q", "--cached", "-r", "--ignore-unmatch", ".venv")
         self._git("commit", "-m", message)
         return self._git("rev-parse", "HEAD")
 

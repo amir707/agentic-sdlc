@@ -18,7 +18,7 @@ import re
 from google.adk.agents import LlmAgent
 from google.adk.models.lite_llm import LiteLlm
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions import DatabaseSessionService, InMemorySessionService
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import (
     StreamableHTTPConnectionParams,
@@ -192,11 +192,21 @@ class ADKInvoker:
 
         agent = build_llm_agent(spec, meter=meter,
                                 max_output_tokens=self.max_output_tokens)
-        session_service = InMemorySessionService()
-        runner = Runner(agent=agent, app_name="agentic-sdlc",
+        # ADK_SESSIONS_DB (e.g. sqlite:///.adk_sessions.db) persists
+        # every pipeline invocation; `make adk-web` points the dev UI
+        # at the same URI, so REAL orchestrator runs — full event
+        # traces, tool calls — are browsable there. app_name = the step
+        # name, matching the dev-UI agent folders. Unset = throwaway
+        # in-memory sessions.
+        sessions_db = os.environ.get("ADK_SESSIONS_DB")
+        session_service = (DatabaseSessionService(db_url=sessions_db)
+                           if sessions_db else InMemorySessionService())
+        runner = Runner(agent=agent, app_name=spec.name,
                         session_service=session_service)
+        # user_id "user" = the adk web dev UI's default identity, so
+        # recorded pipeline sessions appear there without any picker.
         session = await session_service.create_session(
-            app_name="agentic-sdlc", user_id="orchestrator")
+            app_name=spec.name, user_id="user")
 
         content = types.Content(role="user", parts=[types.Part(text=message)])
         final_text: list[str] = []
@@ -204,7 +214,7 @@ class ADKInvoker:
         steps = 0
         try:
             async for event in runner.run_async(
-                    user_id="orchestrator", session_id=session.id,
+                    user_id="user", session_id=session.id,
                     new_message=content):
                 steps += 1
                 if steps > max_steps:

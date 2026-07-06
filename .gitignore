@@ -11,3 +11,5 @@ delivery_store.sqlite3*
 temp-*.md
 .activity.json
 .activity.log.jsonl
+.adk_sessions.db*
+.adk/

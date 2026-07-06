@@ -155,3 +155,21 @@ def test_commit_all_never_stages_the_venv_symlink(repos):
     tracked = _git(base, "ls-files")
     assert ".venv" not in tracked.split()
     assert "work.py" in tracked
+
+
+def test_commit_all_with_real_gitignored_venv_dir(repos):
+    """Regression: with .venv a REAL directory covered by the project's
+    gitignore (sequential mode — no worktree symlink), the old
+    ':(exclude).venv' pathspec made git add exit 1 ('paths are ignored')
+    because it explicitly named an ignored path."""
+    origin, base = repos
+    ws = Workspace(base)
+    ws.start_branch("item/PAY-101-y")
+    (ws.dir / ".gitignore").write_text(".venv/\n")
+    (ws.dir / ".venv" / "bin").mkdir(parents=True)
+    (ws.dir / ".venv" / "bin" / "python").write_text("stub")
+    (ws.dir / "work.py").write_text("y = 2\n")
+    ws.commit_all("PAY-101: work")
+    tracked = _git(base, "ls-files")
+    assert not any(t.startswith(".venv") for t in tracked.split())
+    assert "work.py" in tracked

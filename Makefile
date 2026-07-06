@@ -51,7 +51,8 @@ verify-demo:
 	$(PYTHON) scripts/verify_demo.py
 
 adk-web:
-	.venv/bin/adk web tests/debug/adk_web
+	$(PYTHON) -m google.adk.cli web tests/debug/adk_web \
+	  --session_service_uri $${ADK_SESSIONS_DB:-sqlite+aiosqlite:///.adk_sessions.db}
 
 test:
 	$(PYTHON) -m pytest -q
