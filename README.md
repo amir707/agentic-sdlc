@@ -81,8 +81,78 @@ installer: `python scripts/setup.py` (validates each step, idempotent).
 Secrets policy: no keys or passwords in code or git history — env vars
 via a local `.env` only ([.env.example](.env.example) lists every name).
 
-## Status
+## Running it
 
-Under construction (build compressed into Jul 5–6, 2026). This README
-gains the full run guide, demo script, security model, scaling path,
-and honest-limitations sections as the pieces land.
+One-time: `python3 scripts/setup.py` (validated, idempotent — collects
+model keys + a fine-grained GitHub PAT, generates role tokens, enables
+GCP APIs, seeds the store). Then, in separate terminals:
+
+| Command | What it does |
+|---|---|
+| `make reset` | full world reset: governed repo to baseline, branches deleted, baseline redeployed, store reseeded |
+| `make mcp` | the delivery-store MCP server (localhost, per-role bearer tokens) |
+| `make monitor` | synthetic prober against the live Cloud Run URL |
+| `make orchestrate [PARALLEL=2]` | the pipeline; gates pause for `/approve` comments on the PRs |
+| `make demo` | the conductor: chaos beats + closing receipts |
+| `make watch` | live view: who is doing what, sprint status, audit tail |
+| `make verify-demo` | deterministic eval: asserts the audit trail contains the expected decisions |
+| `make reset-item ITEM=X` | surgical single-item replay |
+
+The engine provisions its own checkout of the governed repo (cloned
+into tmp scratch, healed if broken, deleted after a clean run) — no
+local copy needs to exist.
+
+## Security model
+
+Capability enforcement over prompt enforcement: agents cannot be talked
+out of what they have no tool to do. Merging without human approval is
+structurally impossible; the audit log is append-only because no
+mutation tool exists; the coder's entire effect surface is four
+sandboxed workspace functions. The human gate is identity-checked
+(allowlisted GitHub logins; unauthorized commands are ignored and
+audited). Least privilege throughout: per-role store tokens (only the
+monitor opens incidents, only the resolver closes them), per-agent tool
+filters, credential isolation (agents never hold cloud or GitHub
+credentials). No secrets in code or git history. A deterministic merge
+gate re-verifies and preprod-deploys any head lacking evidence before
+it can ship. Local trust model stated honestly: localhost bearer tokens
+are the demo-scale rung; the production ladder (MCP OAuth, workload
+identity, secret manager) leaves the tool-surface scoping unchanged.
+
+## Evals
+
+Two layers (see [evals/](evals/)): a deterministic pipeline eval
+(`verify_demo.py` — the audit trail doubles as the test oracle, so
+compliance evidence and assertions are the same table) and a per-agent
+dataset for the risk assessor in the Vertex evaluation schema.
+
+## Scaling path (documented, deliberately not built)
+
+State is externalized (GitHub + the store behind MCP), so each runtime
+choice has a drop-in successor that leaves agents and the MCP surface
+untouched: the for-loop scheduler becomes a work queue; the blocking
+gate becomes a webhook-resumed suspension (the ADK Workflow expression
+in `adapters/adk/workflow.py` already renders the pipeline as a
+resumable graph); SQLite becomes Postgres behind the same tools; local
+credentials become workload identity; the tmp-scratch checkout becomes
+the ephemeral-worker clone it already imitates. The release-governance
+slice (verify, monitor/resolver, release manager) is deployable to a
+real team in ADVISORY MODE almost immediately: it comments "I would
+hold this, and why" without merging, building the trust data that
+would justify autonomy later.
+
+## Honest limitations
+
+Real delivery is a state machine with many back-edges; this build
+implements the ones that matter most (review-fix loop, flag-policy
+return, human-gate rejection, escalation with human override,
+post-approval re-verification) and admits the rest as data. The
+groomed-backlog assumption does the heaviest lifting — the messy left
+half of the SDLC (ambiguity, discovery, negotiation) is out of scope.
+The toy candidate app flatters every agent: real risk assessment runs
+on tribal knowledge and large-codebase blast radii. Merge conflicts are
+detected and escalated, never auto-resolved. And the demo compresses a
+sprint into minutes; we do not claim it runs a real team's sprint
+today — the defensible claim is a real solution to the
+build-to-release governance slice, demonstrated on a deliberately
+compressed substrate.
