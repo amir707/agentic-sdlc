@@ -133,6 +133,22 @@ def build_llm_agent(spec: AgentSpec, meter=None,
     )
 
 
+async def _aclose_quietly(obj) -> None:
+    """Best-effort close() for runners/toolsets (sync or async);
+    teardown must never turn a finished run into a failure."""
+    import inspect
+
+    close = getattr(obj, "close", None)
+    if close is None:
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        pass
+
+
 class ADKInvoker:
     def __init__(self, max_output_tokens: int | None = None):
         # Hard cost cap per invocation (bounded loops everywhere).
@@ -186,21 +202,31 @@ class ADKInvoker:
         final_text: list[str] = []
         event_input = event_output = 0
         steps = 0
-        async for event in runner.run_async(
-                user_id="orchestrator", session_id=session.id,
-                new_message=content):
-            steps += 1
-            if steps > max_steps:
-                raise RuntimeError(
-                    f"{spec.name}: exceeded {max_steps} steps (runaway guard)")
-            meta = getattr(event, "usage_metadata", None)
-            if meta:
-                event_input += meta.prompt_token_count or 0
-                event_output += meta.candidates_token_count or 0
-            if event.is_final_response() and event.content:
-                for part in event.content.parts or []:
-                    if getattr(part, "text", None):
-                        final_text.append(part.text)
+        try:
+            async for event in runner.run_async(
+                    user_id="orchestrator", session_id=session.id,
+                    new_message=content):
+                steps += 1
+                if steps > max_steps:
+                    raise RuntimeError(
+                        f"{spec.name}: exceeded {max_steps} steps "
+                        "(runaway guard)")
+                meta = getattr(event, "usage_metadata", None)
+                if meta:
+                    event_input += meta.prompt_token_count or 0
+                    event_output += meta.candidates_token_count or 0
+                if event.is_final_response() and event.content:
+                    for part in event.content.parts or []:
+                        if getattr(part, "text", None):
+                            final_text.append(part.text)
+        finally:
+            # Agents are throwaway invocations, but their MCP sessions
+            # are real connections: close them (and the runner) here,
+            # or they die noisily at event-loop teardown
+            # ("Error on session runner task:" spam after the run).
+            await _aclose_quietly(runner)
+            for tool in agent.tools or []:
+                await _aclose_quietly(tool)
 
         return Invocation(
             text="\n".join(final_text).strip(),

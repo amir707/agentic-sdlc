@@ -37,7 +37,7 @@
     "title": "Sort catalog items by ascending price",
     "description": "Clients want GET /catalog/items returned cheapest-first. Sort the items list by price ascending. The team will implement this one in-house.",
     "type": "story",
-    "implementation": "human",
+    "implementation": "agent",
     "claimed_risk": "low",
     "claimed_impact": "low",
     "area_hint": "catalog",
