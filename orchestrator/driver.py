@@ -529,6 +529,20 @@ async def _release_pass_locked(ctx: RunContext) -> None:
     confidence = ctx.project.policy(
         "release_manager")["deploy_confidence_minutes"]
     for entry in queue:
+        # DETERMINISTIC MERGE GATE (capability, not judgment): the PR's
+        # CURRENT head commit must carry a passing preprod deploy. Any
+        # commit pushed after CI — by anyone — blocks the merge until
+        # preprod passes again on that exact commit.
+        head = ctx.repo_host.get_pr(entry.pr)["head_sha"]
+        comments = ctx.repo_host.get_review_threads(entry.pr)
+        if _find_marker(comments, _marker("ci", head, "passed")) is None:
+            await ctx.audit("release_guard", "hold_merge", {
+                "pr": entry.pr, "head_sha": head,
+                "rule": "head commit has no passing preprod deploy"})
+            print(f"[release] BLOCKED PR #{entry.pr}: head {head[:7]} has "
+                  "no passing preprod deploy", flush=True)
+            continue
+
         ctx.board.begin("RELEASE", "release_manager",
                         f"deciding PR #{entry.pr}")
         payload = {
