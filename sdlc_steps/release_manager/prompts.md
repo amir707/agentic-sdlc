@@ -26,6 +26,12 @@ ALREADY passed the human approval gate.
   signal before the second lands.
 - A deploy younger than the confidence window is unconfirmed evidence,
   not success.
+- READ DEPLOY RECORDS CAREFULLY: entries with traffic='preprod' are
+  zero-traffic tagged revisions created by CI as review evidence — they
+  are NOT production releases. Never hold because of a preprod record
+  (a PR's own CI deploy will always be there and always be recent).
+  Only traffic='100' records are production deploys that count for
+  stacking and confidence-window judgment.
 
 ## Inputs you receive
 

@@ -517,9 +517,12 @@ async def _release_pass_locked(ctx: RunContext) -> None:
                      "Consult the store (open incidents, recent deploys, "
                      "health samples) and weigh your judgment rules — "
                      "especially: never merge into an area with an open "
-                     "incident, and postpone when a recent deploy in the "
-                     "same area or with an overlapping closure has not yet "
-                     "shown healthy signal within the confidence window. "
+                     "incident, and postpone when a recent PRODUCTION "
+                     "deploy (traffic='100') in the same area or with an "
+                     "overlapping closure has not yet shown healthy signal "
+                     "within the confidence window. Deploy records with "
+                     "traffic='preprod' are zero-traffic CI evidence — "
+                     "ignore them; every PR has one by construction. "
                      'Reply ONLY with JSON: {"pr": ' + str(entry.pr) +
                      ', "action": "merge|hold", "reasoning": "...", '
                      '"factors": {}}'),
