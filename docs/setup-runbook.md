@@ -43,7 +43,7 @@ gcloud services enable \
   --project "$GCP_PROJECT"
 ```
 
-## 4. Local secrets (.env, never committed)
+## 3. Local secrets (.env, never committed)
 
 Secrets are split: system-level in `.env` (model keys, MCP role
 tokens), project-level in `config/<project>/.env` (GitHub PAT, GCP
@@ -65,7 +65,7 @@ EOF
 # $GH_OWNER/candidate-app: contents + pull requests, read/write)
 ```
 
-## 5. Baseline deploy (smoke the highest-friction path early)
+## 4. Baseline deploy (smoke the highest-friction path early)
 
 ```bash
 cd agentic-sdlc
@@ -75,7 +75,7 @@ set -a; source .env; source projects-config/candidate-app/.env; set +a
 curl "$(.venv/bin/python -m adapters.deploy url)/health"
 ```
 
-## 6. (Recommended) dedicated deploy service account
+## 5. (Recommended) dedicated deploy service account
 
 Least-privilege deploy identity, instead of your user credentials:
 
@@ -96,7 +96,7 @@ done
 Any command executed later in the build that is not part of the repos
 gets appended to this file at the time it is run.
 
-## 7. Cloud Run tidy-up: drop stale PR-preview tags and revisions
+## 6. Cloud Run tidy-up: drop stale PR-preview tags and revisions
 
 Run when old `pr-N` preview tags pile up on the candidate app. Removes
 every 0%-traffic tag and deletes all revisions except the one serving
@@ -132,7 +132,7 @@ valid (the same candidate-app service is the deploy target); Part B is
 additive. `make watch`/`make monitor` still run locally, pointed at the
 cloud store via DELIVERY_STORE_URL.
 
-## 8. Cloud rung: delivery store + orchestrator on Cloud Run
+## 7. Cloud rung: delivery store + orchestrator on Cloud Run
 
 One image, two roles (see Dockerfile). Demo-scale choices, stated
 honestly: container-disk SQLite behind min=max=1 instance (Cloud SQL is
@@ -219,7 +219,7 @@ still reads local SQLite. A store instance recycle — including
 `gcloud run services update` — loses the world (reseed + rerun); set
 TZ=Australia/Sydney on the service for local-time reports.
 
-## 9. Field notes: hiccups from the first cloud deployment
+## 8. Field notes: hiccups from the first cloud deployment
 
 Every failure hit while standing Part B up, with its fix — already
 folded into section 9 where applicable.
@@ -259,7 +259,7 @@ folded into section 9 where applicable.
   failures are governed outcomes and do not stop the sprint. Rerunning
   the job resumes from the store.
 
-## 10. Re-spinning the orchestrator without a terminal
+## 9. Re-spinning the orchestrator without a terminal
 
 ```bash
 # self-heal transient crashes: Cloud Run retries the task, resume makes

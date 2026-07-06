@@ -140,6 +140,34 @@ def test_flag_coverage_detects_gated_change():
     assert coverage["gated_flags"] == ["payments_refund_totals"]
 
 
+def test_flag_coverage_is_idiom_agnostic():
+    """Regression: a real second-project PR gated correctly with
+    is_enabled("...") scored covered=False — the detector matched only
+    candidate-app's enabled("...") spelling. The engine recognizes the
+    mechanical signature (defined flag name passed to a flag-lookup-
+    shaped call), not one repo's helper name."""
+    for call in ('is_enabled("products_endpoint")',
+                 'enabled("products_endpoint")',
+                 'flags.enabled("products_endpoint")',
+                 'feature_flag("products_endpoint")',
+                 'FlagStore.flag_on("products_endpoint")'):
+        diff = ("diff --git a/flags.json b/flags.json\n"
+                "+++ b/flags.json\n"
+                '+  "products_endpoint": false\n'
+                "diff --git a/api.py b/api.py\n"
+                "+++ b/api.py\n"
+                f"+    if not {call}:\n")
+        assert flag_coverage(diff)["covered"] is True, call
+    # a defined name merely mentioned in a string is NOT a gate
+    diff = ("diff --git a/flags.json b/flags.json\n"
+            "+++ b/flags.json\n"
+            '+  "products_endpoint": false\n'
+            "diff --git a/api.py b/api.py\n"
+            "+++ b/api.py\n"
+            '+    log("products_endpoint")\n')
+    assert flag_coverage(diff)["covered"] is False
+
+
 def test_flag_coverage_requires_definition_and_use():
     # used but never defined in flags.json -> not covered
     used_only = SAMPLE_DIFF.split("diff --git a/flags.json")[0]

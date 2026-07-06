@@ -12,9 +12,13 @@ import re
 _DIFF_FILE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 # a flag key added to flags.json: +  "flag_name": false
 _FLAG_DEFINED = re.compile(r'^\+\s*"([a-z0-9_]+)"\s*:', re.MULTILINE)
-# a flag checked in added code: flags.enabled("flag_name") / enabled('x')
-_FLAG_USED = re.compile(r'^\+.*\benabled\(\s*["\']([a-z0-9_]+)["\']\s*\)',
-                        re.MULTILINE)
+# a flag checked in added code: the flag name passed to any
+# flag-lookup-shaped call — enabled("x"), is_enabled("x"),
+# flag_on("x"), feature_flag("x")... The IDIOM belongs to the governed
+# repo; the engine only recognizes the mechanical signature.
+_FLAG_USED = re.compile(
+    r'^\+.*\b\w*(?:enabled|flag)\w*\s*\(\s*["\']([a-z0-9_]+)["\']',
+    re.MULTILINE | re.IGNORECASE)
 
 
 def files_touched(diff_text: str) -> list[str]:

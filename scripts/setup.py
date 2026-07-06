@@ -189,6 +189,10 @@ Mirror the engine's step layout under `sdlc_steps/<step>/`:
   - `verify/policy.yaml` -> `sensitive_areas` (areas that force a
     risk floor)
   - `sprint_packer/policy.yaml` -> `risk_budget`, `token_budget`
+  - `sdlc_steps/policy.yaml` (shared) -> `flag_required_min_risk`:
+    medium+ risk changes must ship behind a feature flag. If this repo
+    has no flag facility yet, set it to `high` until one exists —
+    otherwise verify blocks medium-risk merges it cannot satisfy.
 
 The full step list lives in the engine's `sdlc_steps/`; every step
 with a `prompts.md` accepts both overlay files. See
