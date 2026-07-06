@@ -821,6 +821,18 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
               f"{sprint['item_ids']}", flush=True)
         backlog = {i["id"]: i for i in await ctx.store.call("list_backlog")}
         selected = [backlog[i] for i in sprint["item_ids"] if i in backlog]
+        # A finished sprint stays finished (the invariant above) — but
+        # say so, and name the items the packer left out, so a no-op
+        # resume never reads as the orchestrator forgetting them.
+        if selected and all(i.get("status") in ("released", "rejected")
+                            for i in selected):
+            leftover = [i["id"] for i in backlog.values()
+                        if (i.get("status") or "pending") == "pending"]
+            note = (f"; {len(leftover)} backlog items were never packed "
+                    f"({', '.join(leftover)}) — run 'make seed' to start "
+                    "a new sprint" if leftover else "")
+            print(f"[pack] sprint #{sprint['id']} is complete: every item "
+                  f"is released or rejected{note}", flush=True)
     else:
         assessments = await run_risk_assessor(ctx)
         selected = await run_sprint_packer(ctx, assessments)
