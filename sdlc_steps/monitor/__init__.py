@@ -10,7 +10,7 @@ The monitor NEVER resolves incidents: closure belongs to the resolver
 (separate concern, separate role token). The chaos flag and this
 monitor never communicate directly; the live service is the medium.
 
-Run: python -m sdlc_steps.monitor --url <live-url> [--project candidate-app]
+Run: python -m sdlc_steps.monitor --url <live-url> --project <name>
 """
 
 import argparse
@@ -80,7 +80,7 @@ async def probe_loop(url: str, project, store: DeliveryStore) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True, help="live service base URL")
-    parser.add_argument("--project", default="candidate-app")
+    parser.add_argument("--project", required=True)
     args = parser.parse_args()
 
     project = load_project(args.project)

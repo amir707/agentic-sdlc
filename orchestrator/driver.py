@@ -296,7 +296,10 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
         for c in verdict.comments) or "- no findings"
     sha = ctx.repo_host.get_pr(pr)["head_sha"]
     ctx.repo_host.post_comment(pr, (
-        f"**Review ({verdict.verdict})** — iteration {iteration + 1}\n\n"
+        f"**🤖 AI code review — {verdict.verdict.upper()}** — "
+        f"iteration {iteration + 1}\n"
+        "<sub>automated reviewer agent verdict; NOT the human gate — "
+        "that is the /approve decision on the dossier</sub>\n\n"
         f"{verdict.reasoning}\n\n{findings}\n\n"
         f"{_marker('review', sha, verdict.verdict)}"))
     return verdict
@@ -358,7 +361,8 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
             # the disagreement ON THE ARTIFACT and hand it to a human —
             # re-reviewing an identical diff resolves nothing.
             ctx.repo_host.post_comment(pr, (
-                "**Coder response (no code changes made)**\n\n"
+                "**🤖 AI coder — response to review (no code changes "
+                "made)**\n\n"
                 f"{reply or '(no reasoning returned)'}"))
             await ctx.audit("code_reviewer", "escalate_to_human", {
                 "pr": pr, "rule": "coder declined the requested changes "
@@ -707,6 +711,26 @@ async def _release_pass_locked(ctx: RunContext) -> None:
 # --- the run -----------------------------------------------------------------
 
 async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
+    """One item through the per-item phase — with a governed boundary:
+    an agent blowing its step budget (runaway guard) is that ITEM's
+    failure, escalated like any other; it never kills the sprint."""
+    try:
+        return await _process_item(ctx, item)
+    except RuntimeError as exc:
+        if "runaway guard" not in str(exc):
+            raise
+        await ctx.audit("orchestrator", "escalate_to_human", {
+            "item": item["id"],
+            "rule": "agent exceeded its step budget mid-item; a human "
+                    "reviews the PR state (reset-item to replay)",
+            "error": str(exc)[:120]})
+        await ctx.set_status(item["id"], "escalated")
+        ctx.board.finish(item["id"], "escalated (runaway agent)")
+        print(f"[{item['id']}] ESCALATED: {exc}", flush=True)
+        return None
+
+
+async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     """One item's full journey (self-contained: parallel workers run
     this concurrently, each with its own workspace)."""
     branch = _branch(item)

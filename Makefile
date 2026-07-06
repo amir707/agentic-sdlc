@@ -17,7 +17,9 @@ DELIVERY_STORE_DB = $(if $(filter candidate-app,$(PROJECT)),delivery_store.sqlit
 endif
 
 # World-selecting targets never guess which project you mean: PROJECT
-# must come from the command line or the shell, not the default.
+# must come from the command line or the shell, not the default. Only
+# demo/reset-demo keep the default — they run candidate-app's scripted
+# demo rig by definition.
 define require_project
 	@if [ "$(origin PROJECT)" = "file" ]; then \
 	  echo "PROJECT is required: make $@ PROJECT=<name>   (available: $$(ls projects-config | tr '\n' ' '))"; \
@@ -34,13 +36,16 @@ mcp:
 	$(PYTHON) -m mcp_server.server
 
 monitor:
-	$(PYTHON) -m sdlc_steps.monitor --url $$($(PYTHON) -m adapters.deploy url)
+	$(require_project)
+	$(PYTHON) -m sdlc_steps.monitor --project $(PROJECT) \
+	  --url $$($(PYTHON) -m adapters.deploy url)
 
 orchestrate:
 	$(require_project)
 	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
 
 deploy-baseline:
+	$(require_project)
 	PROJECT_CHECKOUT_DIR=$$($(PYTHON) -m orchestrator.provisioning --project $(PROJECT)) \
 	  $(PYTHON) -m adapters.deploy baseline
 
@@ -50,6 +55,7 @@ reset-demo:
 
 # surgical replay of ONE item: make reset-item ITEM=PAY-102
 reset-item:
+	$(require_project)
 	$(PYTHON) scripts/reset_item.py --item $(ITEM) --project $(PROJECT)
 
 demo:
@@ -58,6 +64,7 @@ demo:
 # local store: read the SQLite file directly; cloud store (run with
 # DELIVERY_STORE_URL=https://.../mcp): curl its /status route
 status:
+	$(require_project)
 	@if [ -n "$$DELIVERY_STORE_URL" ]; then \
 	  curl -fsS -H "Authorization: Bearer $$MCP_TOKEN_MONITOR" \
 	    "$${DELIVERY_STORE_URL%/mcp}/status"; \
@@ -68,6 +75,7 @@ status:
 # live store view: refreshes every 5s, colorized, changed lines get a
 # yellow margin bar (4th terminal during demos)
 watch:
+	$(require_project)
 	@$(PYTHON) scripts/watch.py
 
 # preview new-project onboarding: scaffold a bundle interactively,
@@ -82,6 +90,7 @@ try-setup:
 	  else rm -rf projects-config/$(NAME) && echo "deleted (preview only)"; fi
 
 verify-demo:
+	$(require_project)
 	$(PYTHON) scripts/verify_demo.py
 
 adk-web:

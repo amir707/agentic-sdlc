@@ -48,7 +48,9 @@ def render_dossier(dossier: Dossier, approvers: list[str]) -> str:
     concerns = "\n".join(f"- {line}" for line in dossier.open_concerns) or "- none"
     mentions = " ".join(f"@{a}" for a in approvers)
     return (
-        "## Decision dossier\n\n"
+        "## 🧾 Decision dossier\n"
+        "<sub>assembled by the AI approver agent — the DECISION is "
+        "yours, below</sub>\n\n"
         f"**Preprod:** {dossier.preprod_summary}\n\n"
         f"**Verified labels:** {dossier.verified_labels_summary}\n\n"
         f"**Review threads:**\n{triage}\n\n"

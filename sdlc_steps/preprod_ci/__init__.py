@@ -67,7 +67,8 @@ def format_comment(result: CIResult) -> str:
     """The PR comment that makes the PR carry its own evidence."""
     smoke_lines = "\n".join(f"- `{e}` → {s}" for e, s in result.smoke.items())
     status = "✅ PASSED" if result.passed else "❌ FAILED"
-    return (f"**Preprod CI {status}**\n\n"
+    return (f"**⚙️ Preprod CI {status}** <sub>(deterministic step, "
+            "not a review)</sub>\n\n"
             f"- commit: `{result.commit_sha}`\n"
             f"- revision tag: `{result.revision_tag}`\n"
             f"- preprod URL: {result.preprod_url or 'n/a'}\n"
