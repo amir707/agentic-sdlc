@@ -25,7 +25,8 @@ from orchestrator.config import ProjectConfig
 from orchestrator.dependency_graph import blast_radius, build_import_graph
 from tools.diff_analysis import files_touched
 from orchestrator.activity import ActivityBoard
-from orchestrator.gate import await_decision, check_decision
+from orchestrator.gate import (Decision, await_decision, check_decision,
+                               parse_command)
 from orchestrator.invoker import AgentInvoker, Invocation
 from orchestrator.json_util import extract_json
 from orchestrator import schemas
@@ -87,6 +88,30 @@ class RunContext:
         from this, never from GitHub (the PR is only the artifact)."""
         await self.store.call("set_item_status", item_id=item_id,
                               status=status, pr=pr)
+
+
+async def _escalation_override(ctx: "RunContext", item: dict,
+                               pr: int) -> Decision | None:
+    """An escalated/failed item re-enters the pipeline only by HUMAN
+    word: the latest allowlisted gate command on the PR that is NEWER
+    than the escalation itself. /approve = overrule and queue (the
+    machine gates — verify + preprod — still re-run at release);
+    /reject = back to the backlog."""
+    approvers = ctx.project.policy("approver")["approvers"]
+    audit = await ctx.store.call("list_audit")
+    escalated_at = max(
+        (e["ts"] for e in audit
+         if e["factors"].get("pr") == pr and "escalate" in e["decision"]),
+        default=None)
+    for comment in reversed(ctx.repo_host.get_review_threads(pr)):
+        parsed = parse_command(comment["body"])
+        if not parsed or comment["author"] not in approvers:
+            continue
+        if escalated_at and comment["created_at"] <= escalated_at:
+            return None  # command predates the escalation: stale
+        kind, reason = parsed
+        return Decision(kind=kind, author=comment["author"], reason=reason)
+    return None
 
 
 def _marker(kind: str, sha: str, extra: str = "") -> str:
@@ -557,6 +582,8 @@ async def _release_pass_locked(ctx: RunContext) -> None:
             async with ctx.ci_lock:
                 ci_ok = await run_preprod_ci(ctx, entry.item, entry.pr,
                                              fresh)
+            ctx.board.finish(entry.item["id"],
+                             "head re-verified + preprod re-deployed")
             if not ci_ok:
                 await ctx.audit("release_guard", "hold_merge", {
                     "pr": entry.pr, "head_sha": head,
@@ -652,10 +679,35 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         print(f"[resume] {item['id']}: already released — nothing to do",
               flush=True)
         return None
-    if status in ("rejected", "escalated", "failed"):
-        print(f"[resume] {item['id']}: status={status} — waiting on a "
-              "human; skipping this run", flush=True)
+    if status == "rejected":
+        print(f"[resume] {item['id']}: rejected — nothing to do", flush=True)
         return None
+    if status in ("escalated", "failed"):
+        override = await _escalation_override(ctx, item, pr) if pr else None
+        if override is None or override.kind == "hold":
+            print(f"[resume] {item['id']}: status={status} — waiting on a "
+                  "human (/approve or /reject on the PR to resolve); "
+                  "skipping this run", flush=True)
+            return None
+        if override.kind == "reject":
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(pr, "human_declined", "backlog",
+                                   override.reason or "declined after "
+                                   "escalation"),
+                         actor="approval_gate")
+            await ctx.set_status(item["id"], "rejected")
+            return None
+        # /approve: the human overrules the escalation. Judgment is
+        # theirs; the MACHINE checks are not — the release gate will
+        # re-verify and re-deploy this head before any merge.
+        await ctx.audit("approval_gate", "human_override_escalation", {
+            "pr": pr, "item": item["id"], "author": override.author,
+            "was_status": status})
+        await ctx.set_status(item["id"], "queued", pr)
+        status = "queued"
+        print(f"[resume] {item['id']}: escalation overridden by "
+              f"{override.author}'s /approve — queued for release "
+              "(machine gates re-run)", flush=True)
 
     if pr is None:
         if item["implementation"] == "human":

@@ -57,6 +57,10 @@ def _local(ts) -> str:
 
 def _item_line(row: dict, board: dict | None) -> str:
     current = (board or {}).get("current", {})
+    # A terminal store status outranks a leftover NOW entry (a crashed
+    # or path-skipping run can leave the board stale; the store cannot).
+    if row["status"] in ("released", "rejected") and row["id"] in current:
+        current = {}
     if row["id"] in current:
         entry = current[row["id"]]
         busy = _elapsed(time.time() - entry["since"])
