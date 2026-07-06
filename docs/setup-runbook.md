@@ -13,6 +13,16 @@ export GCP_REGION=australia-southeast2      # any Cloud Run region
 export GH_OWNER=amir707                     # GitHub account/org
 ```
 
+---
+
+# Part A — LOCAL rung
+
+Engine, store, monitor, and orchestrator run on your machine; only the
+governed candidate-app lives on Cloud Run. Sections 3, 6, 7, 8 issue
+gcloud commands (they target the candidate-app service) but are run
+FROM your machine. This is the rung `scripts/setup.py` automates and
+the demo recording uses.
+
 ## 1. One-time local tooling (already present on the build machine)
 
 ```bash
@@ -143,6 +153,16 @@ for rev in $(gcloud run revisions list --service "$SERVICE" --region "$REGION" \
 done
 ```
 
+---
+
+# Part B — GOOGLE CLOUD rung
+
+The engine itself moves to Cloud Run: the delivery store becomes a
+service, the orchestrator becomes a job. Everything in Part A stays
+valid (the same candidate-app service is the deploy target); Part B is
+additive. `make watch`/`make monitor` still run locally, pointed at the
+cloud store via DELIVERY_STORE_URL.
+
 ## 9. Cloud rung: delivery store + orchestrator on Cloud Run
 
 One image, two roles (see Dockerfile). Demo-scale choices, stated
@@ -171,8 +191,10 @@ for s in ANTHROPIC_API_KEY GOOGLE_API_KEY \
   printf '%s' "$(grep "^$s=" .env | cut -d= -f2-)" \
     | gcloud secrets create "$s" --data-file=-
 done
-printf '%s' "$(grep '^GITHUB_TOKEN=' projects-config/candidate-app/.env \
-  | cut -d= -f2-)" | gcloud secrets create GITHUB_TOKEN --data-file=-
+for s in GITHUB_TOKEN CONFIG_TOKEN; do
+  printf '%s' "$(grep "^$s=" projects-config/candidate-app/.env \
+    | cut -d= -f2-)" | gcloud secrets create "$s" --data-file=-
+done
 
 # 9.3 one-time: service account for the orchestrator job
 gcloud iam service-accounts create "$SA"
@@ -182,7 +204,7 @@ SA_EMAIL="$SA@$PROJECT_ID.iam.gserviceaccount.com"
 # on the build bucket + artifactregistry.writer):
 gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member="serviceAccount:$SA_EMAIL" --role=roles/editor
-for s in ANTHROPIC_API_KEY GOOGLE_API_KEY GITHUB_TOKEN \
+for s in ANTHROPIC_API_KEY GOOGLE_API_KEY GITHUB_TOKEN CONFIG_TOKEN \
          MCP_TOKEN_AGENTS MCP_TOKEN_MONITOR MCP_TOKEN_RESOLVER; do
   gcloud secrets add-iam-policy-binding "$s" \
     --member="serviceAccount:$SA_EMAIL" \
@@ -205,7 +227,7 @@ gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
   --command=python --args=-m,orchestrator,--project,candidate-app,--parallel,2 \
   --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
   --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
-  --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
+  --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 
 # 9.6 run a sprint; approvals: comment /approve on the PR while the job
 # polls, or after it exits re-execute — the store resumes the world
@@ -227,3 +249,63 @@ timers (the activity board is on the job's disk) and `make verify-demo`
 still reads local SQLite. A store instance recycle — including
 `gcloud run services update` — loses the world (reseed + rerun); set
 TZ=Australia/Sydney on the service for local-time reports.
+
+## 10. Field notes: hiccups from the first cloud deployment
+
+Every failure hit while standing Part B up, with its fix — already
+folded into section 9 where applicable.
+
+- **Tag vs digest.** `gcloud builds submit --tag` moves the `:latest`
+  tag in the registry only. Running services/jobs stay pinned to the
+  digest resolved at their last update — after every rebuild you MUST
+  `gcloud run jobs update --image` (and `services update` if the store
+  changed). Same tag string, new pinned digest.
+- **Secret exists but "versions/latest was not found".** A
+  `gcloud secrets create` fed an empty string (grep missed the key)
+  creates a versionless secret; later `create` says it already exists.
+  Fix: `gcloud secrets versions add NAME --data-file=-`.
+- **Which .env holds which secret.** Engine keys (model APIs, MCP role
+  tokens) live in `.env`; GITHUB_TOKEN and CONFIG_TOKEN are
+  project-scoped and live in `projects-config/<name>/.env`. The first
+  deploy missed both; the job died at first PR push / first preprod
+  deploy respectively.
+- **Store 401 on secret mount.** A service deployed without
+  `--service-account` runs as the default compute SA, which has no
+  secretAccessor grants. Both service and job run as $SA_EMAIL.
+- **`jobs create` → "already exists".** A create that failed validation
+  still leaves the job resource; rerun as `gcloud run jobs update` with
+  identical flags.
+- **Agents couldn't reach the store while the driver could.** The
+  agents' McpToolset hardcoded loopback; fixed in code — every store
+  client resolves DELIVERY_STORE_URL first.
+- **Gemini `503 UNAVAILABLE` (high demand) killed a run.** Fixed in
+  code: the invoker retries transient provider errors (429/503/529)
+  with backoff; only daily quotas fail fast.
+- **OpenTelemetry "Failed to detach context" tracebacks** in job logs
+  are benign ADK/MCP teardown noise (severity ERROR only because they
+  are stderr tracebacks). Judge a run by its `[pipeline]`/`[release]`
+  lines and the container exit code.
+- **Fail-fast is process-wide by design.** One unhandled error (almost
+  always config, e.g. a missing env var) exits the whole job; per-item
+  failures are governed outcomes and do not stop the sprint. Rerunning
+  the job resumes from the store.
+
+## 11. Re-spinning the orchestrator without a terminal
+
+```bash
+# self-heal transient crashes: Cloud Run retries the task, resume makes
+# it safe
+gcloud run jobs update orchestrator --region "$REGION" --max-retries=2
+
+# heartbeat: re-execute hourly (re-checks gates, held PRs, incidents)
+gcloud scheduler jobs create http orchestrator-heartbeat \
+  --location "$REGION" --schedule "0 * * * *" \
+  --uri "https://run.googleapis.com/v2/projects/$PROJECT_ID/locations/$REGION/jobs/orchestrator:run" \
+  --http-method POST --oauth-service-account-email "$SA_EMAIL"
+# pause while driving runs by hand (nothing guards concurrent
+# executions of the job):
+gcloud scheduler jobs pause orchestrator-heartbeat --location "$REGION"
+```
+
+The production successor remains a GitHub webhook (issue_comment ->
+jobs.run), so the /approve comment itself triggers the resuming run.

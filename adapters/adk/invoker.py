@@ -90,10 +90,15 @@ def _gemini_limiter() -> MinIntervalLimiter:
 _LIMITER: MinIntervalLimiter | None = None
 
 
-def _is_rate_limit(exc: BaseException) -> bool:
+def _is_transient(exc: BaseException) -> bool:
+    """Errors where retrying is the correct response: rate limits and
+    provider capacity flakes (Gemini 503 'high demand', Anthropic 529
+    'overloaded'). Anything else propagates — it will not self-heal."""
     text = str(exc)
-    return "429" in text or "RESOURCE_EXHAUSTED" in text \
-        or "rate_limit" in text.lower()
+    return ("429" in text or "RESOURCE_EXHAUSTED" in text
+            or "rate_limit" in text.lower()
+            or "503" in text or "UNAVAILABLE" in text
+            or "529" in text or "overloaded" in text.lower())
 
 
 def _retry_seconds(exc: BaseException, attempt: int) -> float:
@@ -170,14 +175,15 @@ class ADKInvoker:
             try:
                 return await self._invoke_once(spec, message, max_steps)
             except Exception as exc:  # noqa: BLE001 — filtered below
-                if not _is_rate_limit(exc) or attempt >= retries:
+                if not _is_transient(exc) or attempt >= retries:
                     raise
                 if "PerDay" in str(exc):
                     # A DAILY quota will not recover within any retry
                     # window — fail fast with the actionable summary.
                     raise
                 delay = _retry_seconds(exc, attempt)
-                print(f"[invoker] {spec.name}: rate-limited (429); "
+                print(f"[invoker] {spec.name}: transient provider "
+                      f"error ({type(exc).__name__}); "
                       f"retry {attempt + 1}/{retries} in {delay:.0f}s",
                       flush=True)
                 await asyncio.sleep(delay)

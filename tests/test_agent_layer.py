@@ -166,19 +166,24 @@ def test_repo_host_raises_on_error():
         host.post_comment(99, "nope")
 
 
-def test_rate_limit_detection_and_backoff():
-    from adapters.adk.invoker import _is_rate_limit, _retry_seconds
+def test_transient_error_detection_and_backoff():
+    from adapters.adk.invoker import _is_transient, _retry_seconds
 
     gemini_429 = Exception(
         "429 RESOURCE_EXHAUSTED. ... Please retry in 8.478154025s.")
-    assert _is_rate_limit(gemini_429)
+    assert _is_transient(gemini_429)
     assert 10 <= _retry_seconds(gemini_429, 0) <= 11  # provider hint + margin
 
     anthropic_429 = Exception("RateLimitError: rate_limit_error ...")
-    assert _is_rate_limit(anthropic_429)
+    assert _is_transient(anthropic_429)
     assert _retry_seconds(anthropic_429, 1) == 30.0   # exponential fallback
 
-    assert not _is_rate_limit(Exception("400 INVALID_ARGUMENT"))
+    # capacity flakes retry too (killed a cloud run before they did)
+    assert _is_transient(Exception(
+        "503 UNAVAILABLE. This model is currently experiencing high demand."))
+    assert _is_transient(Exception("529 overloaded_error"))
+
+    assert not _is_transient(Exception("400 INVALID_ARGUMENT"))
 
 
 def test_gemini_requests_are_paced():
