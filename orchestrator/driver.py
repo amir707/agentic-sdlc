@@ -530,18 +530,41 @@ async def _release_pass_locked(ctx: RunContext) -> None:
         "release_manager")["deploy_confidence_minutes"]
     for entry in queue:
         # DETERMINISTIC MERGE GATE (capability, not judgment): the PR's
-        # CURRENT head commit must carry a passing preprod deploy. Any
-        # commit pushed after CI — by anyone — blocks the merge until
-        # preprod passes again on that exact commit.
-        head = ctx.repo_host.get_pr(entry.pr)["head_sha"]
+        # CURRENT head commit must carry a passing preprod deploy. If it
+        # does not — a commit landed after approval — the gate
+        # REMEDIATES: re-verify and re-deploy that head to preprod now;
+        # only failure blocks the merge.
+        pr_data = ctx.repo_host.get_pr(entry.pr)
+        head = pr_data["head_sha"]
         comments = ctx.repo_host.get_review_threads(entry.pr)
         if _find_marker(comments, _marker("ci", head, "passed")) is None:
-            await ctx.audit("release_guard", "hold_merge", {
-                "pr": entry.pr, "head_sha": head,
-                "rule": "head commit has no passing preprod deploy"})
-            print(f"[release] BLOCKED PR #{entry.pr}: head {head[:7]} has "
-                  "no passing preprod deploy", flush=True)
-            continue
+            print(f"[release] PR #{entry.pr}: head {head[:7]} has no "
+                  "passing preprod — verifying and deploying it now",
+                  flush=True)
+            # Detached: another worktree may hold the branch in
+            # parallel mode; CI only needs the tree + sha.
+            ctx.workspace.checkout_detached(pr_data["head_ref"])
+            fresh = await verify_once(ctx, entry.item, entry.pr)
+            if fresh.needs_flag:
+                await ctx.audit("release_guard", "hold_merge", {
+                    "pr": entry.pr, "head_sha": head,
+                    "rule": "post-approval head violates the flag policy"})
+                await ctx.set_status(entry.item["id"], "escalated")
+                print(f"[release] BLOCKED PR #{entry.pr}: new head "
+                      "violates flag policy — escalated", flush=True)
+                continue
+            entry.verified = fresh
+            async with ctx.ci_lock:
+                ci_ok = await run_preprod_ci(ctx, entry.item, entry.pr,
+                                             fresh)
+            if not ci_ok:
+                await ctx.audit("release_guard", "hold_merge", {
+                    "pr": entry.pr, "head_sha": head,
+                    "rule": "preprod failed for the current head"})
+                await ctx.set_status(entry.item["id"], "failed")
+                print(f"[release] BLOCKED PR #{entry.pr}: preprod failed "
+                      "for head {0}".format(head[:7]), flush=True)
+                continue
 
         ctx.board.begin("RELEASE", "release_manager",
                         f"deciding PR #{entry.pr}")
@@ -579,7 +602,22 @@ async def _release_pass_locked(ctx: RunContext) -> None:
                    **decision.factors,
                    "reasoning": decision.reasoning}
         if decision.action == "merge":
-            ctx.repo_host.merge_pr(entry.pr)
+            try:
+                ctx.repo_host.merge_pr(entry.pr)
+            except Exception as exc:  # noqa: BLE001 — degrade, don't die
+                # Typically 405: branch not mergeable (main advanced and
+                # the branch conflicts — flags.json is the usual magnet).
+                # Auto-rebase is a documented successor, not built: the
+                # PR stays queued with an audited reason for a human
+                # (rebase, or make reset-item to replay).
+                await ctx.audit("release_guard", "hold_merge", {
+                    "pr": entry.pr,
+                    "rule": "merge failed — branch likely conflicts with "
+                            "advanced main; rebase or reset-item",
+                    "error": str(exc)[:200]})
+                print(f"[release] BLOCKED PR #{entry.pr}: not mergeable "
+                      f"({str(exc)[:80]})", flush=True)
+                continue
             deploy.promote(f"pr-{entry.pr}")
             await ctx.store.call("record_deploy", pr=entry.pr,
                                  revision=f"pr-{entry.pr}", traffic="100",
@@ -639,6 +677,21 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
             ctx.workspace.checkout(ctx.repo_host.get_pr(pr)["head_ref"])
         else:
             ctx.workspace.checkout(branch)
+
+    # CONFLICTS ARE HUMAN WORK: the coder is never asked to reconcile
+    # parallel changes from main (it once "fixed" flags.json into
+    # duplicate keys trying). A conflicted PR escalates immediately.
+    if ctx.repo_host.get_pr(pr).get("mergeable") is False:
+        await ctx.audit("release_guard", "escalate_to_human", {
+            "pr": pr, "item": item["id"],
+            "rule": "merge conflict with main — human rebases (or "
+                    "make reset-item to replay)"})
+        await ctx.set_status(item["id"], "escalated")
+        ctx.board.finish(item["id"], "merge conflict — human")
+        print(f"[resume] {item['id']}: PR #{pr} conflicts with main — "
+              "escalated to a human (agents never resolve conflicts)",
+              flush=True)
+        return None
 
     if status == "queued":
         # Human approval already given (previous run): recompute the
