@@ -396,7 +396,8 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
         + _marker("ci", sha, "passed" if ci.passed else "failed")))
     if ci.preprod_url:
         await ctx.store.call("record_deploy", pr=pr,
-                             revision=ci.revision_tag, traffic="preprod")
+                             revision=ci.revision_tag, traffic="preprod",
+                             area=verified.primary_area)
     await ctx.audit("preprod_ci", "preprod_result", {
         "pr": pr, "passed": ci.passed, "revision": ci.revision_tag,
         "preprod_url": ci.preprod_url, "smoke": ci.smoke})
@@ -549,7 +550,8 @@ async def _release_pass_locked(ctx: RunContext) -> None:
             ctx.repo_host.merge_pr(entry.pr)
             deploy.promote(f"pr-{entry.pr}")
             await ctx.store.call("record_deploy", pr=entry.pr,
-                                 revision=f"pr-{entry.pr}", traffic="100")
+                                 revision=f"pr-{entry.pr}", traffic="100",
+                                 area=entry.verified.primary_area)
             await ctx.audit("release_manager", "merge_pr", factors)
             await ctx.set_status(entry.item["id"], "released")
             entry.merged = True

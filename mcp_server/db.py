@@ -65,6 +65,9 @@ CREATE TABLE IF NOT EXISTS deploys (
     pr INTEGER NOT NULL,
     revision TEXT NOT NULL,
     traffic TEXT NOT NULL,
+    -- area lets the release manager judge same-area stacking on FACTS
+    -- (it once held a payments PR because a CATALOG deploy had no area)
+    area TEXT NOT NULL DEFAULT '',
     ts TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS token_usage (
@@ -236,10 +239,12 @@ def list_health_samples(conn, area: str, window_seconds: int) -> list[dict]:
 
 # --- deploys ---------------------------------------------------------------
 
-def record_deploy(conn, pr: int, revision: str, traffic: str) -> None:
+def record_deploy(conn, pr: int, revision: str, traffic: str,
+                  area: str = "") -> None:
     conn.execute(
-        "INSERT INTO deploys (pr, revision, traffic, ts) VALUES (?, ?, ?, ?)",
-        (pr, revision, traffic, now()))
+        "INSERT INTO deploys (pr, revision, traffic, area, ts) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (pr, revision, traffic, area, now()))
     conn.commit()
 
 

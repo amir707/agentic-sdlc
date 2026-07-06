@@ -186,11 +186,13 @@ def list_health_samples(area: str, window_seconds: int) -> list[dict]:
 # --- deploys ---------------------------------------------------------------
 
 @mcp.tool()
-def record_deploy(pr: int, revision: str, traffic: str) -> dict:
-    """Record a deploy event (preprod tag or traffic shift)."""
+def record_deploy(pr: int, revision: str, traffic: str,
+                  area: str = "") -> dict:
+    """Record a deploy event (preprod tag or traffic shift) with the
+    area it touches, so release stacking judgment works on facts."""
     _require("agents")
     with db.connect() as conn:
-        db.record_deploy(conn, pr, revision, traffic)
+        db.record_deploy(conn, pr, revision, traffic, area)
     return {"recorded": revision}
 
 

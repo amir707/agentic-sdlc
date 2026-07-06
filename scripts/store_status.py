@@ -142,7 +142,8 @@ def main() -> None:
     for d in conn.execute("SELECT * FROM deploys ORDER BY id DESC"):
         item = pr_to_item.get(d["pr"], "?")
         print(f"  {_local(d['ts']):<13} {item:<9} PR #{d['pr']:<4} "
-              f"{d['revision']:<10} traffic={d['traffic']}")
+              f"{d['revision']:<10} traffic={d['traffic']:<8} "
+              f"area={d['area'] or '?'}")
 
     section("audit tail (last 12, newest first)")
     audit = db.list_audit(conn)

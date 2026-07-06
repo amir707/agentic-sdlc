@@ -31,7 +31,9 @@ ALREADY passed the human approval gate.
   are NOT production releases. Never hold because of a preprod record
   (a PR's own CI deploy will always be there and always be recent).
   Only traffic='100' records are production deploys that count for
-  stacking and confidence-window judgment.
+  stacking and confidence-window judgment — and each record carries its
+  AREA: a fresh production deploy in a DIFFERENT area with no closure
+  overlap is not a reason to hold.
 
 ## Inputs you receive
 
