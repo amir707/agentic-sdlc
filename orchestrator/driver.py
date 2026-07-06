@@ -23,7 +23,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from orchestrator.config import ProjectConfig
-from orchestrator.dependency_graph import blast_radius, build_import_graph
+from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
+                                           build_import_graph)
 from tools.diff_analysis import files_touched
 from orchestrator.activity import ActivityBoard
 from orchestrator.gate import (Decision, await_decision, check_decision,
@@ -315,7 +316,21 @@ async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
         ctx.project.policy("orchestrator")["max_fix_iterations"])
 
     for iteration in range(max_iterations + 1):
-        verdict = await review_once(ctx, item, pr, iteration)
+        # Agent-written code may not even parse; that is coder rework
+        # (one bounded fix round like any other), never an engine crash.
+        try:
+            verdict = await review_once(ctx, item, pr, iteration)
+        except UnparseableSource as broken:
+            if iteration >= max_iterations:
+                break
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(pr, "code_unparseable", "coder",
+                                   f"the code does not parse: {broken}"),
+                         actor="code_reviewer")
+            await run_coder(ctx, item, branch, feedback=(
+                f"Your change does not parse: {broken}. Fix the syntax "
+                "error so every file compiles and the tests run."))
+            continue
 
         if verdict.verdict == "approve":
             await ctx.audit("code_reviewer", "approve_review",
@@ -398,8 +413,24 @@ async def run_verify(ctx: RunContext, item: dict, pr: int,
     max_flag_fixes = int(
         ctx.project.policy("orchestrator")["max_flag_fix_iterations"])
 
+    rule = f"flag still missing after {max_flag_fixes} fix"
     for attempt in range(max_flag_fixes + 1):
-        result = await verify_once(ctx, item, pr)
+        try:
+            result = await verify_once(ctx, item, pr)
+        except UnparseableSource as broken:
+            # Same bounded rework loop as a missing flag: measurement is
+            # impossible until the code parses, so back to the coder.
+            rule = f"code still unparseable after {max_flag_fixes} fix"
+            if attempt >= max_flag_fixes:
+                break
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(pr, "code_unparseable", "coder",
+                                   f"the code does not parse: {broken}"),
+                         actor="verify")
+            await run_coder(ctx, item, branch, feedback=(
+                f"Your change does not parse: {broken}. Fix the syntax "
+                "error so every file compiles and the tests run."))
+            continue
         if not result.needs_flag:
             return result
 
@@ -416,8 +447,7 @@ async def run_verify(ctx: RunContext, item: dict, pr: int,
             "gated behind a feature flag (default off) in flags.json. Wrap "
             "it and keep tests covering both flag states."))
 
-    await ctx.audit("verify", "escalate_to_human", {
-        "pr": pr, "rule": f"flag still missing after {max_flag_fixes} fix"})
+    await ctx.audit("verify", "escalate_to_human", {"pr": pr, "rule": rule})
     return None
 
 
@@ -570,7 +600,18 @@ async def _release_pass_locked(ctx: RunContext) -> None:
             # Detached: another worktree may hold the branch in
             # parallel mode; CI only needs the tree + sha.
             ctx.workspace.checkout_detached(pr_data["head_ref"])
-            fresh = await verify_once(ctx, entry.item, entry.pr)
+            try:
+                fresh = await verify_once(ctx, entry.item, entry.pr)
+            except UnparseableSource as broken:
+                # No rework loop this late: post-approval commits are a
+                # human's to answer for. Block the merge and escalate.
+                await ctx.audit("release_guard", "hold_merge", {
+                    "pr": entry.pr, "head_sha": head,
+                    "rule": f"post-approval head does not parse: {broken}"})
+                await ctx.set_status(entry.item["id"], "escalated")
+                print(f"[release] BLOCKED PR #{entry.pr}: head "
+                      f"{head[:7]} does not parse — escalated", flush=True)
+                continue
             if fresh.needs_flag:
                 await ctx.audit("release_guard", "hold_merge", {
                     "pr": entry.pr, "head_sha": head,

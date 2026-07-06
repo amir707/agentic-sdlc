@@ -14,7 +14,9 @@ from pathlib import Path
 import pytest
 
 from orchestrator.config import ConfigError, load_project
-from orchestrator.dependency_graph import blast_radius, build_import_graph, dependents_closure
+from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
+                                           build_import_graph,
+                                           dependents_closure)
 from tools.diff_analysis import areas_touched, files_touched, flag_coverage
 from sdlc_steps.sprint_packer import pack
 
@@ -94,6 +96,18 @@ def test_blast_radius_is_transitive(toy_repo):
 def test_closure_ignores_unknown_modules(toy_repo):
     graph = build_import_graph(toy_repo)
     assert dependents_closure(graph, {"not.a.module"}) == set()
+
+
+def test_broken_source_raises_domain_error_not_syntaxerror(toy_repo):
+    """Agent-written code that does not parse must surface as
+    UnparseableSource (rejection material, PR #33 incident) — never as
+    a bare SyntaxError that kills the run."""
+    (toy_repo / "app" / "payments.py").write_text(
+        "PRICES = {'a': 1,\n")  # '{' never closed
+    with pytest.raises(UnparseableSource) as exc:
+        blast_radius(toy_repo, ["app/payments.py"])
+    assert exc.value.path == "app/payments.py"
+    assert "line 1" in exc.value.detail
 
 
 # --- tools/diff_analysis -----------------------------------------------------

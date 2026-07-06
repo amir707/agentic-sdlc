@@ -13,6 +13,19 @@ import ast
 from pathlib import Path
 
 
+class UnparseableSource(Exception):
+    """A repo file does not parse, so the graph — and any risk math on
+    top of it — cannot be trusted. Agent-written code makes this a
+    NORMAL input, not an engine fault: callers turn it into a rejection
+    (reason code `code_unparseable`); this module only refuses to
+    guess."""
+
+    def __init__(self, path: str, detail: str):
+        super().__init__(f"{path}: {detail}")
+        self.path = path
+        self.detail = detail
+
+
 def _module_name(py_file: Path, repo_dir: Path) -> str:
     rel = py_file.relative_to(repo_dir).with_suffix("")
     return ".".join(rel.parts)
@@ -29,7 +42,12 @@ def build_import_graph(repo_dir: str | Path) -> dict[str, set[str]]:
     graph: dict[str, set[str]] = {name: set() for name in modules}
 
     for name, py_file in modules.items():
-        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        try:
+            tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        except SyntaxError as exc:
+            raise UnparseableSource(
+                str(py_file.relative_to(repo_dir)),
+                f"{exc.msg} (line {exc.lineno})") from exc
         for node in ast.walk(tree):
             imported: list[str] = []
             if isinstance(node, ast.Import):

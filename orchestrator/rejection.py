@@ -7,6 +7,8 @@ new mechanisms.
 Launch reason codes:
 - policy_flag_required  (verify, return_to=coder; PR stays open for the
   bounded flag-fix iteration)
+- code_unparseable      (reviewer/verify, return_to=coder; the code does
+  not even parse, so nothing downstream can measure it)
 - out_of_scope          (reviewer, return_to=author)
 - human_declined        (approval gate, return_to=backlog; PR closed)
 """
