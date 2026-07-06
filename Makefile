@@ -46,13 +46,10 @@ status:
 	  $(PYTHON) scripts/store_status.py; \
 	fi
 
-# live store view: refreshes every 5s (4th terminal during demos)
+# live store view: refreshes every 5s, colorized, changed lines get a
+# yellow margin bar (4th terminal during demos)
 watch:
-	@while true; do \
-	  out=$$($(MAKE) -s status 2>&1); \
-	  printf '\033[H\033[2J\033[3J'; printf '%s\n' "$$out"; \
-	  sleep 5; \
-	done
+	@$(PYTHON) scripts/watch.py
 
 verify-demo:
 	$(PYTHON) scripts/verify_demo.py
