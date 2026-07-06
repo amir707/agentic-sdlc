@@ -140,3 +140,18 @@ def test_engine_provisions_and_deprovisions_its_own_checkout(
 
     provisioning.deprovision("candidate-app")
     assert not ws.dir.exists()
+
+
+def test_commit_all_never_stages_the_venv_symlink(repos):
+    """Regression: a worktree's .venv SYMLINK once got committed via
+    git add -A (gitignore '.venv/' misses symlinks) and, merged, made
+    every fresh clone self-referential. commit_all excludes it."""
+    origin, base = repos
+    ws = Workspace(base)
+    ws.start_branch("item/PAY-101-x")
+    (ws.dir / "work.py").write_text("x = 1\n")
+    (ws.dir / ".venv").symlink_to(ws.dir / ".venv")   # worst case: self-link
+    ws.commit_all("PAY-101: work")
+    tracked = _git(base, "ls-files")
+    assert ".venv" not in tracked.split()
+    assert "work.py" in tracked

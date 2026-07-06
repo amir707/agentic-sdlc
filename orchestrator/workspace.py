@@ -39,6 +39,14 @@ class Workspace:
         # test run dies on a missing interpreter.
         self._git("clean", "-fd", "-e", ".venv")
 
+    def checkout_detached(self, ref: str) -> None:
+        """Materialize a remote ref without claiming its branch — safe
+        when another worktree holds the branch (parallel mode) and all
+        the caller needs is the tree + sha (e.g. a CI re-run)."""
+        self._git("fetch", "origin", ref)
+        self._git("checkout", "-f", "--detach", "FETCH_HEAD")
+        self._git("clean", "-fd", "-e", ".venv")
+
     def checkout(self, branch: str) -> None:
         self._git("fetch", "origin", branch)
         self._git("checkout", "-f", branch)
@@ -52,8 +60,13 @@ class Workspace:
         return bool(self._git("status", "--porcelain"))
 
     def commit_all(self, message: str) -> str:
-        """Commit everything the agent changed. No AI co-author trailers."""
-        self._git("add", "-A")
+        """Commit everything the agent changed. No AI co-author trailers.
+
+        .venv is engine plumbing (a symlink in worktrees): gitignore's
+        '.venv/' pattern misses symlinks, and one committed link, once
+        merged, poisons every fresh clone with a self-referential path
+        — excluded here unconditionally."""
+        self._git("add", "-A", "--", ".", ":(exclude).venv")
         self._git("commit", "-m", message)
         return self._git("rev-parse", "HEAD")
 

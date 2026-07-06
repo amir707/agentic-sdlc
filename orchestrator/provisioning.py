@@ -70,8 +70,18 @@ def _ensure_venv(target: Path) -> None:
     requirements = next(
         (target / name for name in ("requirements-dev.txt", "requirements.txt")
          if (target / name).exists()), None)
-    if requirements is None or (target / ".venv" / "bin" / "python").exists():
+    if requirements is None:
         return
+    venv = target / ".venv"
+    if (venv / "bin" / "python").exists():
+        return
+    if venv.is_symlink() or venv.exists():
+        # husk or self-referential symlink (a poisoned clone) — rebuild
+        _log("removing broken .venv before rebuild")
+        if venv.is_symlink():
+            venv.unlink()
+        else:
+            shutil.rmtree(venv, ignore_errors=True)
     _log(f"building venv from {requirements.name}")
     subprocess.run(["uv", "venv", "--python", "3.12", "-q",
                     str(target / ".venv")],
