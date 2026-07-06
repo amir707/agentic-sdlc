@@ -706,6 +706,12 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
             break
         await run_release_pass(ctx)
 
+    # The engine cleans up after itself: the scratch checkout (and its
+    # worktrees) are deleted on a CLEAN finish; a crashed run keeps
+    # them so resume is instant. GitHub holds the truth either way.
+    from orchestrator import provisioning
+    provisioning.deprovision(ctx.project.name)
+
 
 # The explicit binding: definition step name -> handler.
 HANDLERS = {
@@ -725,11 +731,18 @@ HANDLERS = {
 def build_context(project: ProjectConfig,
                   invoker: AgentInvoker) -> RunContext:
     """The invoker arrives from the composition root (__main__), which
-    is the only place that chooses a framework (ADR-0007)."""
+    is the only place that chooses a framework (ADR-0007). The working
+    checkout is PROVISIONED by the engine itself (cloned into scratch,
+    healed if missing) — no pre-existing local copy is required."""
+    from orchestrator import provisioning
+
+    repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
+    workspace = provisioning.provision(
+        project.name, repo_host.authenticated_remote())
     return RunContext(
         project=project,
         store=DeliveryStore.for_agents(),
-        repo_host=GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"]),
+        repo_host=repo_host,
         invoker=invoker,
-        workspace=Workspace(os.environ["CANDIDATE_APP_DIR"]),
+        workspace=workspace,
     )

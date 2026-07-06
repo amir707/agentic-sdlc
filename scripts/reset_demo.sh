@@ -20,7 +20,8 @@ source .env
 source projects-config/candidate-app/.env
 set +a
 
-CAND="$CANDIDATE_APP_DIR"
+# The engine provisions its own checkout (self-heals if deleted).
+CAND="$(.venv/bin/python -m orchestrator.provisioning --project candidate-app)"
 
 echo "== 1/4 reset candidate-app main to baseline =="
 git -C "$CAND" fetch -q origin
@@ -40,7 +41,7 @@ git -C "$CAND" reset -q --hard origin/main
 git -C "$CAND" clean -qfd
 
 echo "== 3/4 redeploy baseline to Cloud Run (takes a minute or two) =="
-.venv/bin/python -m adapters.deploy baseline
+CANDIDATE_APP_DIR="$CAND" .venv/bin/python -m adapters.deploy baseline
 
 echo "== 4/4 reseed the store =="
 .venv/bin/python scripts/seed.py

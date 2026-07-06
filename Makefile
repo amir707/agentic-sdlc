@@ -22,7 +22,8 @@ orchestrate:
 	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
 
 deploy-baseline:
-	$(PYTHON) -m adapters.deploy baseline
+	CANDIDATE_APP_DIR=$$($(PYTHON) -m orchestrator.provisioning --project $(PROJECT)) \
+	  $(PYTHON) -m adapters.deploy baseline
 
 # FULL demo reset: candidate-app main + branches + baseline traffic + store
 reset:

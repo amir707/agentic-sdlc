@@ -113,3 +113,30 @@ def test_worktree_venv_symlink_survives_start_branch(repos):
     ws2 = factory.for_item("PAY-101")
     assert (ws2.dir / ".venv").is_symlink()
     factory.cleanup()
+
+
+def test_engine_provisions_and_deprovisions_its_own_checkout(
+        repos, tmp_path, monkeypatch):
+    """The SDLC materializes its own working copy: clone into scratch on
+    demand, heal a deleted/broken checkout, delete after itself."""
+    origin, _ = repos
+    monkeypatch.delenv("CANDIDATE_APP_DIR", raising=False)
+    monkeypatch.setenv("AGENTIC_SDLC_SCRATCH", str(tmp_path / "scratch"))
+    from orchestrator import provisioning
+
+    ws = provisioning.provision("candidate-app", str(origin))
+    assert (ws.dir / ".git").exists()
+    assert str(ws.dir).startswith(str(tmp_path / "scratch"))
+
+    # idempotent reuse (same clone, no error)
+    again = provisioning.provision("candidate-app", str(origin))
+    assert again.dir == ws.dir
+
+    # heals a husk (directory exists, .git gone)
+    import shutil
+    shutil.rmtree(ws.dir / ".git")
+    healed = provisioning.provision("candidate-app", str(origin))
+    assert (healed.dir / ".git").exists()
+
+    provisioning.deprovision("candidate-app")
+    assert not ws.dir.exists()
