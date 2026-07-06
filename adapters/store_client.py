@@ -17,7 +17,10 @@ from mcp.client.streamable_http import streamablehttp_client
 class DeliveryStore:
     def __init__(self, token: str, url: str | None = None):
         port = os.environ.get("DELIVERY_STORE_PORT", "8787")
-        self.url = url or f"http://127.0.0.1:{port}/mcp"
+        # DELIVERY_STORE_URL points at a remote store (e.g. Cloud Run);
+        # default stays the local loopback rung.
+        self.url = (url or os.environ.get("DELIVERY_STORE_URL")
+                    or f"http://127.0.0.1:{port}/mcp")
         self.headers = {"Authorization": f"Bearer {token}"}
 
     @classmethod

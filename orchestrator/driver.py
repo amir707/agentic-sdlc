@@ -18,6 +18,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -711,6 +712,16 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
 
     if pr is None:
         if item["implementation"] == "human":
+            if not sys.stdin.isatty():
+                # Headless (Cloud Run Job): nobody can type a PR number.
+                # Escalate and move on; a later run resumes the item.
+                await ctx.audit("orchestrator", "escalate_to_human", {
+                    "item": item["id"],
+                    "rule": "human-implemented item needs an operator "
+                            "terminal — resume interactively"})
+                await ctx.set_status(item["id"], "escalated")
+                ctx.board.finish(item["id"], "escalated (headless run)")
+                return None
             ctx.board.begin(item["id"], "await_human_pr", "team implements")
             raw = input(f"[human item] {item['id']} is human-implemented; "
                         "enter PR number when raised: ").strip()
@@ -844,6 +855,12 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     # remaining holds one more look now that the sprint is complete.
     await run_release_pass(ctx)
     while any(not a.merged for a in ctx.approved):
+        if not sys.stdin.isatty():
+            # Headless: held PRs stay queued in the store; the next job
+            # execution (webhook/scheduler-triggered) reconsiders them.
+            print("[release] held PRs remain — headless run ends; "
+                  "re-execute to reconsider", flush=True)
+            break
         answer = input("\n[release] held PRs remain; run another release "
                        "pass? [Y/n] ").strip().lower()
         if answer == "n":

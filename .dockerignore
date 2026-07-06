@@ -1,0 +1,19 @@
+# Secrets stay out of the image — they arrive via Secret Manager.
+.env
+projects-config/*/.env
+
+# Local state and caches
+.git
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+.adk_sessions.db*
+.activity.json
+.activity.log.jsonl
+temp-*.md
+tests/debug/adk_web/*/.adk
+Dockerfile

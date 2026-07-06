@@ -28,8 +28,11 @@ from starlette.responses import JSONResponse
 
 from mcp_server import db
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("DELIVERY_STORE_PORT", "8787"))
+# Local trust rung binds loopback; a cloud deployment sets
+# DELIVERY_STORE_HOST=0.0.0.0 and Cloud Run injects PORT.
+HOST = os.environ.get("DELIVERY_STORE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT",
+                          os.environ.get("DELIVERY_STORE_PORT", "8787")))
 
 # Role of the caller for the current request, set by the auth middleware.
 _caller_role: contextvars.ContextVar[str] = contextvars.ContextVar("caller_role")
@@ -237,6 +240,18 @@ def list_audit() -> list[dict]:
     """The full audit trail, oldest first."""
     with db.connect() as conn:
         return db.list_audit(conn)
+
+
+# --- ops visibility ----------------------------------------------------------
+
+@mcp.custom_route("/status", methods=["GET"])
+async def status_report(request):
+    """The make-status report, rendered HERE because the SQLite file
+    lives here. Read-only; any valid role token passes the middleware."""
+    from starlette.responses import PlainTextResponse
+
+    from scripts.store_status import report
+    return PlainTextResponse(report())
 
 
 # --- auth middleware ---------------------------------------------------------

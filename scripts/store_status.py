@@ -184,5 +184,16 @@ def main() -> None:
               f"calls={u['calls']}")
 
 
+def report() -> str:
+    """The full status text — the store's /status route serves this so
+    `make watch` works against a remote store too."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        main()
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
     main()

@@ -43,8 +43,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", default="candidate-app",
                         help="project name under config/")
+    parser.add_argument("--if-empty", action="store_true",
+                        help="seed only when the store has no backlog "
+                             "(container boot: idempotent, never wipes)")
     args = parser.parse_args()
     seed_file = ROOT / "projects-config" / args.project / "backlog.json"
+    if args.if_empty and Path(db.db_path()).exists():
+        conn = db.connect()
+        db.init_schema(conn)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM backlog_items").fetchone()[0]
+        if count:
+            print(f"store already has {count} backlog items — not touching it")
+            return
     _reset_activity_board()
     path = db.db_path()
     for suffix in ("", "-wal", "-shm"):

@@ -36,13 +36,20 @@ reset-item:
 demo:
 	bash scripts/demo.sh
 
+# local store: read the SQLite file directly; cloud store (run with
+# DELIVERY_STORE_URL=https://.../mcp): curl its /status route
 status:
-	$(PYTHON) scripts/store_status.py
+	@if [ -n "$$DELIVERY_STORE_URL" ]; then \
+	  curl -fsS -H "Authorization: Bearer $$MCP_TOKEN_MONITOR" \
+	    "$${DELIVERY_STORE_URL%/mcp}/status"; \
+	else \
+	  $(PYTHON) scripts/store_status.py; \
+	fi
 
 # live store view: refreshes every 5s (4th terminal during demos)
 watch:
 	@while true; do \
-	  out=$$($(PYTHON) scripts/store_status.py 2>&1); \
+	  out=$$($(MAKE) -s status 2>&1); \
 	  printf '\033[H\033[2J\033[3J'; printf '%s\n' "$$out"; \
 	  sleep 5; \
 	done

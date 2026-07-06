@@ -31,10 +31,14 @@ from orchestrator.invoker import AgentSpec, Invocation, StoreTools
 def _materialize_tool(tool):
     """Turn a declared tool need into an ADK tool."""
     if isinstance(tool, StoreTools):
+        # Same resolution as adapters/store_client.py: a remote store
+        # via DELIVERY_STORE_URL (cloud), else the local loopback rung.
         port = os.environ.get("DELIVERY_STORE_PORT", "8787")
+        url = (os.environ.get("DELIVERY_STORE_URL")
+               or f"http://127.0.0.1:{port}/mcp")
         return McpToolset(
             connection_params=StreamableHTTPConnectionParams(
-                url=f"http://127.0.0.1:{port}/mcp",
+                url=url,
                 headers={"Authorization":
                          f"Bearer {os.environ['MCP_TOKEN_AGENTS']}"},
             ),

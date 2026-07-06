@@ -142,3 +142,88 @@ for rev in $(gcloud run revisions list --service "$SERVICE" --region "$REGION" \
   gcloud run revisions delete "$rev" --region "$REGION" --quiet
 done
 ```
+
+## 9. Cloud rung: delivery store + orchestrator on Cloud Run
+
+One image, two roles (see Dockerfile). Demo-scale choices, stated
+honestly: container-disk SQLite behind min=max=1 instance (Cloud SQL is
+the successor), public store URL guarded by the same per-role bearer
+tokens (IAM ID tokens are the successor), gate polling inside the job
+(GitHub webhook -> job execution is the successor).
+
+```bash
+PROJECT_ID=$(gcloud config get-value project)
+REGION=australia-southeast2
+SA=agentic-sdlc-orch
+
+# 9.1 one-time: Artifact Registry repo + image build (Cloud Build)
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com secretmanager.googleapis.com
+gcloud artifacts repositories create agentic-sdlc \
+  --repository-format=docker --location="$REGION"
+IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/agentic-sdlc/engine:latest"
+gcloud builds submit --tag "$IMAGE" .   # from the agentic-sdlc repo root
+
+# 9.2 one-time: secrets. Engine keys live in .env; GITHUB_TOKEN is
+# project-scoped and lives in the project bundle's .env.
+for s in ANTHROPIC_API_KEY GOOGLE_API_KEY \
+         MCP_TOKEN_AGENTS MCP_TOKEN_MONITOR MCP_TOKEN_RESOLVER; do
+  printf '%s' "$(grep "^$s=" .env | cut -d= -f2-)" \
+    | gcloud secrets create "$s" --data-file=-
+done
+printf '%s' "$(grep '^GITHUB_TOKEN=' projects-config/candidate-app/.env \
+  | cut -d= -f2-)" | gcloud secrets create GITHUB_TOKEN --data-file=-
+
+# 9.3 one-time: service account for the orchestrator job
+gcloud iam service-accounts create "$SA"
+SA_EMAIL="$SA@$PROJECT_ID.iam.gserviceaccount.com"
+# demo shortcut (least-privilege alternative: run.admin +
+# iam.serviceAccountUser + cloudbuild.builds.editor + storage.admin
+# on the build bucket + artifactregistry.writer):
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SA_EMAIL" --role=roles/editor
+for s in ANTHROPIC_API_KEY GOOGLE_API_KEY GITHUB_TOKEN \
+         MCP_TOKEN_AGENTS MCP_TOKEN_MONITOR MCP_TOKEN_RESOLVER; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --member="serviceAccount:$SA_EMAIL" \
+    --role=roles/secretmanager.secretAccessor
+done
+
+# 9.4 the delivery store (Cloud Run service, single instance)
+gcloud run deploy delivery-store --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" \
+  --allow-unauthenticated --min-instances=1 --max-instances=1 \
+  --no-cpu-throttling --memory=512Mi \
+  --set-env-vars=DELIVERY_STORE_HOST=0.0.0.0,PROJECT=candidate-app \
+  --set-secrets=MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_MONITOR=MCP_TOKEN_MONITOR:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
+STORE_URL="$(gcloud run services describe delivery-store \
+  --region "$REGION" --format='value(status.url)')/mcp"
+
+# 9.5 the orchestrator (Cloud Run Job)
+gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" \
+  --command=python --args=-m,orchestrator,--project,candidate-app,--parallel,2 \
+  --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
+  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
+  --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
+
+# 9.6 run a sprint; approvals: comment /approve on the PR while the job
+# polls, or after it exits re-execute — the store resumes the world
+gcloud run jobs execute orchestrator --region "$REGION"
+gcloud beta run jobs logs tail orchestrator --region "$REGION"
+
+# 9.7 monitor and watch stay local, pointed at the cloud store
+DELIVERY_STORE_URL="$STORE_URL" make monitor
+DELIVERY_STORE_URL="$STORE_URL" make watch   # curls the store's /status
+
+# image update after code changes
+gcloud builds submit --tag "$IMAGE" . && \
+  gcloud run jobs update orchestrator --image "$IMAGE" --region "$REGION" && \
+  gcloud run services update delivery-store --image "$IMAGE" --region "$REGION"
+```
+
+Caveats at this rung: cloud `make watch` lacks the live NOW-worker
+timers (the activity board is on the job's disk) and `make verify-demo`
+still reads local SQLite. A store instance recycle — including
+`gcloud run services update` — loses the world (reseed + rerun); set
+TZ=Australia/Sydney on the service for local-time reports.
