@@ -12,13 +12,16 @@ import re
 _DIFF_FILE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
 # a flag key added to flags.json: +  "flag_name": false
 _FLAG_DEFINED = re.compile(r'^\+\s*"([a-z0-9_]+)"\s*:', re.MULTILINE)
-# a flag checked in added code: the flag name passed to any
-# flag-lookup-shaped call — enabled("x"), is_enabled("x"),
-# flag_on("x"), feature_flag("x")... The IDIOM belongs to the governed
-# repo; the engine only recognizes the mechanical signature.
+# The flag-usage IDIOM belongs to the governed repo; the engine only
+# recognizes the mechanical signature, in either shape:
+#   direct:   is_enabled("flag_name") / flags.enabled('x') / flag_on("x")
+#   indirect: FLAG = "flag_name" ... is_enabled(FLAG)  — one constant hop
 _FLAG_USED = re.compile(
     r'^\+.*\b\w*(?:enabled|flag)\w*\s*\(\s*["\']([a-z0-9_]+)["\']',
     re.MULTILINE | re.IGNORECASE)
+_FLAG_LOOKUP_CALL = re.compile(
+    r'^\+.*\b\w*(?:enabled|flag)\w*\s*\(', re.MULTILINE | re.IGNORECASE)
+_ADDED_STRING = re.compile(r'^\+.*?["\']([a-z0-9_]+)["\']', re.MULTILINE)
 
 
 def files_touched(diff_text: str) -> list[str]:
@@ -39,8 +42,14 @@ def flag_coverage(diff_text: str) -> dict:
     (flag_required_min_risk), applied by the reviewer and verify.
     """
     in_flags_json = _in_file_hunks(diff_text, "flags.json")
+    outside = _outside_file_hunks(diff_text, "flags.json")
     defined = set(_FLAG_DEFINED.findall(in_flags_json))
     used = set(_FLAG_USED.findall(diff_text))
+    if _FLAG_LOOKUP_CALL.search(outside):
+        # a lookup call exists; a defined name held in a constant that
+        # feeds it counts as usage (regexes cannot trace dataflow, so
+        # "defined + referenced + looked-up" is the honest bar)
+        used |= set(_ADDED_STRING.findall(outside))
     gated = defined & used
     return {
         "flags_defined": sorted(defined),
@@ -55,3 +64,10 @@ def _in_file_hunks(diff_text: str, filename: str) -> str:
     parts = re.split(r"^diff --git ", diff_text, flags=re.MULTILINE)
     return "".join(p for p in parts if p.startswith(f"a/{filename} ")
                    or f"+++ b/{filename}" in p)
+
+
+def _outside_file_hunks(diff_text: str, filename: str) -> str:
+    """Everything in the diff EXCEPT one file's hunks."""
+    parts = re.split(r"^diff --git ", diff_text, flags=re.MULTILINE)
+    return "".join(p for p in parts if not (p.startswith(f"a/{filename} ")
+                                            or f"+++ b/{filename}" in p))

@@ -5,3 +5,11 @@
 # Generator-critic loop bounds — no unbounded agent loops of any kind.
 max_fix_iterations: 2        # reviewer round-trips before human escalation
 max_flag_fix_iterations: 1   # verify's flag-required return before escalation
+
+# End-of-sprint release rechecks: while approved PRs remain unmerged
+# (incident holds, confidence windows), re-run the release pass on this
+# cadence — waiting on the WORLD, same carve-out as the human gate's
+# poll — until the wait budget runs out. Held PRs stay queued in the
+# store either way; any later run reconsiders them.
+release_recheck_seconds: 45
+max_release_wait_minutes: 20

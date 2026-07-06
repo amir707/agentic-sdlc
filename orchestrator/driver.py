@@ -831,7 +831,20 @@ async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         # Human approval already given (previous run): recompute the
         # verified labels (cheap, deterministic) and requeue directly —
         # the gate is NOT asked twice for the same commit.
-        verified = await verify_once(ctx, item, pr)
+        try:
+            verified = await verify_once(ctx, item, pr)
+        except UnparseableSource as broken:
+            # Same stance as the release gate: an approved-but-broken
+            # head is a human's to answer for, and one PR's syntax
+            # error never kills the run.
+            await ctx.audit("release_guard", "escalate_to_human", {
+                "pr": pr, "item": item["id"],
+                "rule": f"queued head does not parse: {broken}"})
+            await ctx.set_status(item["id"], "escalated")
+            ctx.board.finish(item["id"], "escalated (head does not parse)")
+            print(f"[{item['id']}] BLOCKED PR #{pr}: head does not parse "
+                  "— escalated", flush=True)
+            return None
         ctx.board.finish(item["id"], "requeued for release")
         approved = ApprovedPR(pr=pr, item=item, verified=verified)
         ctx.approved.append(approved)
@@ -931,18 +944,25 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     # Trickle passes already ran per approval; this final pass gives any
     # remaining holds one more look now that the sprint is complete.
     await run_release_pass(ctx)
-    while any(not a.merged for a in ctx.approved):
-        if not sys.stdin.isatty():
-            # Headless: held PRs stay queued in the store; the next job
-            # execution (webhook/scheduler-triggered) reconsiders them.
-            print("[release] held PRs remain — headless run ends; "
-                  "re-execute to reconsider", flush=True)
-            break
-        answer = input("\n[release] held PRs remain; run another release "
-                       "pass? [Y/n] ").strip().lower()
-        if answer == "n":
-            break
+    # AUTONOMOUS release rechecks: "when to reconsider a held PR" is
+    # answered by the world (incident recovery, confidence windows)
+    # plus policy — never by a terminal prompt. Bounded like every
+    # other loop; held PRs stay queued in the store when the budget
+    # runs out, and any later run reconsiders them.
+    flow = ctx.project.policy("orchestrator")
+    recheck = float(flow["release_recheck_seconds"])
+    budget = float(flow["max_release_wait_minutes"]) * 60.0
+    waited = 0.0
+    while any(not a.merged for a in ctx.approved) and waited < budget:
+        print(f"[release] held PRs remain — next pass in {recheck:.0f}s "
+              f"(wait budget left: {(budget - waited) / 60:.0f}m)",
+              flush=True)
+        await asyncio.sleep(recheck)
+        waited += recheck
         await run_release_pass(ctx)
+    if any(not a.merged for a in ctx.approved):
+        print("[release] wait budget exhausted — held PRs stay queued; "
+              "a rerun reconsiders them", flush=True)
 
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps

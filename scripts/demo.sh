@@ -78,9 +78,9 @@ pause "BEAT 6: now /approve the PAYMENTS PR on GitHub. Watch the
     the open incident (audited with factors). Then keep approving the
     other PRs as their dossiers arrive — each gets its own decision,
     and the catalog PRs MERGE one by one DURING the incident
-    (different area: the contrast is the point). Come back HERE when
-    the orchestrator asks:
-    'held PRs remain; run another release pass?'" \
+    (different area: the contrast is the point). Come back HERE once
+    the orchestrator settles into its autonomous release rechecks:
+    '[release] held PRs remain — next pass in 45s'" \
     "confirm the hold happened and the sprint items are done"
 
 # --- beat 7: recovery + merge -------------------------------------------------------
@@ -88,10 +88,10 @@ echo
 echo "BEAT 7: flipping chaos OFF now — watch the MONITOR terminal:"
 echo "        two consecutive healthy windows (~30s) let the resolver close it."
 chaos off
-pause "After ~2 healthy windows, answer 'Y' to the orchestrator's
-    release-pass prompt: the resolver closes the incident and the held
-    payments PR MERGES (traffic shifts). When the orchestrator exits,
-    come back." \
+pause "After ~2 healthy windows, just WATCH the orchestrator: on its
+    next autonomous recheck the resolver closes the incident and the
+    held payments PR MERGES by itself (traffic shifts) — no human in
+    that loop. When the orchestrator exits, come back." \
     "show the receipts (verify_demo + audit tail)"
 
 # --- receipts ---------------------------------------------------------------------

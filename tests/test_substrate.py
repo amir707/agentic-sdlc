@@ -158,7 +158,18 @@ def test_flag_coverage_is_idiom_agnostic():
                 "+++ b/api.py\n"
                 f"+    if not {call}:\n")
         assert flag_coverage(diff)["covered"] is True, call
-    # a defined name merely mentioned in a string is NOT a gate
+    # one constant hop counts: FLAG = "name" ... is_enabled(FLAG)
+    diff = ("diff --git a/flags.json b/flags.json\n"
+            "+++ b/flags.json\n"
+            '+  "cart_subtotal_endpoint": false\n'
+            "diff --git a/cart.py b/cart.py\n"
+            "+++ b/cart.py\n"
+            '+CART_FLAG = "cart_subtotal_endpoint"\n'
+            "+    if not is_enabled(CART_FLAG):\n")
+    assert flag_coverage(diff)["covered"] is True
+
+    # a defined name merely mentioned in a string, with NO lookup call
+    # anywhere in the diff, is NOT a gate
     diff = ("diff --git a/flags.json b/flags.json\n"
             "+++ b/flags.json\n"
             '+  "products_endpoint": false\n'

@@ -147,7 +147,8 @@ def _validate(config: ProjectConfig) -> None:
             raise ConfigError(f"monitor policy missing {key!r}")
 
     flow = config.policy("orchestrator")
-    for key in ("max_fix_iterations", "max_flag_fix_iterations"):
+    for key in ("max_fix_iterations", "max_flag_fix_iterations",
+                "release_recheck_seconds", "max_release_wait_minutes"):
         if key not in flow:
             raise ConfigError(f"orchestrator policy missing {key!r}")
 
