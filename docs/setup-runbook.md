@@ -309,3 +309,19 @@ gcloud scheduler jobs pause orchestrator-heartbeat --location "$REGION"
 
 The production successor remains a GitHub webhook (issue_comment ->
 jobs.run), so the /approve comment itself triggers the resuming run.
+
+## 12. Stop a cloud orchestrator run
+
+Cancelling is safe: every transition is checkpointed in the store first,
+so a cancelled execution is just the crashed-run path — the next
+execution resumes each item from its stored status.
+
+```bash
+REGION=australia-southeast2
+
+# find the running execution (RUNNING column > 0)
+gcloud run jobs executions list --job orchestrator --region "$REGION"
+
+# cancel it (SIGTERM, ~10s grace)
+gcloud run jobs executions cancel <EXECUTION-NAME> --region "$REGION" --quiet
+```
