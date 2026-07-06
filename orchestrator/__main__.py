@@ -1,4 +1,4 @@
-"""Entry point: python -m orchestrator [--project candidate-app]"""
+"""Entry point: python -m orchestrator --project <name>"""
 
 import argparse
 import asyncio
@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the governed SDLC.")
-    parser.add_argument("--project", default="candidate-app")
+    parser.add_argument("--project", required=True)
     parser.add_argument(
         "--parallel", type=int, default=1, metavar="N",
         help="run up to N coders concurrently, each in its own git "

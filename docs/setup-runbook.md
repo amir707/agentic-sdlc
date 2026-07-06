@@ -33,23 +33,7 @@ gcloud config list        # verify account + project
 gh auth status            # verify account
 ```
 
-## 2. GitHub repos (private during development)
-
-```bash
-# candidate-app: run from a checkout of the candidate-app directory
-git init -b main && git add -A
-git commit -m "Baseline candidate app: payments/catalog areas, feature flags, protected chaos toggle"
-gh repo create candidate-app --private --source . --push
-
-# agentic-sdlc: same pattern from the agentic-sdlc directory
-# (repo was created as sprint-governor and renamed:
-#  gh repo rename agentic-sdlc --yes)
-git init -b main && git add -A
-git commit -m "Agentic SDLC: initial structure"
-gh repo create agentic-sdlc --private --source . --push
-```
-
-## 3. Google Cloud project APIs (once per project)
+## 2. Google Cloud project APIs (once per project)
 
 ```bash
 gcloud services enable \
@@ -59,22 +43,7 @@ gcloud services enable \
   --project "$GCP_PROJECT"
 ```
 
-## 4. Python environments (per checkout)
-
-```bash
-# candidate-app
-cd candidate-app
-uv venv --python 3.12 .venv
-uv pip install -p .venv/bin/python -r requirements-dev.txt
-.venv/bin/python -m pytest -q
-
-# agentic-sdlc
-cd agentic-sdlc
-uv venv --python 3.12 .venv
-uv pip install -p .venv/bin/python -r requirements-dev.txt
-```
-
-## 5. Local secrets (.env, never committed)
+## 4. Local secrets (.env, never committed)
 
 Secrets are split: system-level in `.env` (model keys, MCP role
 tokens), project-level in `config/<project>/.env` (GitHub PAT, GCP
@@ -96,7 +65,7 @@ EOF
 # $GH_OWNER/candidate-app: contents + pull requests, read/write)
 ```
 
-## 6. Baseline deploy (smoke the highest-friction path early)
+## 5. Baseline deploy (smoke the highest-friction path early)
 
 ```bash
 cd agentic-sdlc
@@ -106,18 +75,18 @@ set -a; source .env; source projects-config/candidate-app/.env; set +a
 curl "$(.venv/bin/python -m adapters.deploy url)/health"
 ```
 
-## 7. (Recommended) dedicated deploy service account
+## 6. (Recommended) dedicated deploy service account
 
 Least-privilege deploy identity, instead of your user credentials:
 
 ```bash
-gcloud iam service-accounts create sprint-governor-deploy \
-  --display-name "sprint-governor deploy" --project "$GCP_PROJECT"
+gcloud iam service-accounts create agentic-sdlc-deploy \
+  --display-name "agentic-sdlc deploy" --project "$GCP_PROJECT"
 for role in roles/run.admin roles/cloudbuild.builds.editor \
             roles/artifactregistry.writer roles/iam.serviceAccountUser \
             roles/storage.admin; do
   gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member "serviceAccount:sprint-governor-deploy@$GCP_PROJECT.iam.gserviceaccount.com" \
+    --member "serviceAccount:agentic-sdlc-deploy@$GCP_PROJECT.iam.gserviceaccount.com" \
     --role "$role"
 done
 ```
@@ -127,7 +96,7 @@ done
 Any command executed later in the build that is not part of the repos
 gets appended to this file at the time it is run.
 
-## 8. Cloud Run tidy-up: drop stale PR-preview tags and revisions
+## 7. Cloud Run tidy-up: drop stale PR-preview tags and revisions
 
 Run when old `pr-N` preview tags pile up on the candidate app. Removes
 every 0%-traffic tag and deletes all revisions except the one serving
@@ -163,7 +132,7 @@ valid (the same candidate-app service is the deploy target); Part B is
 additive. `make watch`/`make monitor` still run locally, pointed at the
 cloud store via DELIVERY_STORE_URL.
 
-## 9. Cloud rung: delivery store + orchestrator on Cloud Run
+## 8. Cloud rung: delivery store + orchestrator on Cloud Run
 
 One image, two roles (see Dockerfile). Demo-scale choices, stated
 honestly: container-disk SQLite behind min=max=1 instance (Cloud SQL is
@@ -226,7 +195,7 @@ gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
   --command=python --args=-m,orchestrator,--project,candidate-app,--parallel,2 \
   --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
-  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
+  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
   --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 
 # 9.6 run a sprint; approvals: comment /approve on the PR while the job
@@ -250,7 +219,7 @@ still reads local SQLite. A store instance recycle — including
 `gcloud run services update` — loses the world (reseed + rerun); set
 TZ=Australia/Sydney on the service for local-time reports.
 
-## 10. Field notes: hiccups from the first cloud deployment
+## 9. Field notes: hiccups from the first cloud deployment
 
 Every failure hit while standing Part B up, with its fix — already
 folded into section 9 where applicable.
@@ -290,7 +259,7 @@ folded into section 9 where applicable.
   failures are governed outcomes and do not stop the sprint. Rerunning
   the job resumes from the store.
 
-## 11. Re-spinning the orchestrator without a terminal
+## 10. Re-spinning the orchestrator without a terminal
 
 ```bash
 # self-heal transient crashes: Cloud Run retries the task, resume makes
@@ -310,7 +279,7 @@ gcloud scheduler jobs pause orchestrator-heartbeat --location "$REGION"
 The production successor remains a GitHub webhook (issue_comment ->
 jobs.run), so the /approve comment itself triggers the resuming run.
 
-## 12. Stop a cloud orchestrator run
+## 11. Stop a cloud orchestrator run
 
 Cancelling is safe: every transition is checkpointed in the store first,
 so a cancelled execution is just the crashed-run path — the next

@@ -206,3 +206,45 @@ def test_reviewer_capacity_binds():
     result = pack(items, assessments, policy)
     assert len(result.selected) == 2
     assert result.refused[0].constraint == "reviewer_capacity"
+
+
+def test_setup_scaffolds_a_valid_project_bundle(tmp_path, monkeypatch):
+    """A scaffolded bundle must pass load_project's full validation:
+    onboarding a new project is 4 answered prompts, not hand-editing."""
+    import builtins
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "setup_script", ROOT / "scripts" / "setup.py")
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+
+    answers = iter(["acme/shop-api", "", "alice,bob", ""])
+    monkeypatch.setattr(builtins, "input", lambda prompt="": next(answers))
+    from orchestrator import config
+    monkeypatch.setattr(config, "PROJECTS", tmp_path)
+
+    setup._scaffold(tmp_path / "shop-api", "shop-api")
+    cfg = config.load_project("shop-api")
+    assert cfg.repo == "acme/shop-api"
+    assert cfg.service == "shop-api"
+    assert cfg.policy("approver")["approvers"] == ["alice", "bob"]
+    assert cfg.policy("sprint_packer")["risk_budget"]  # engine defaults merge
+    assert (tmp_path / "shop-api" / "README.md").exists()
+
+    # The sample item must satisfy the store schema's CHECK constraints
+    # (a scaffolded project's first `make seed` may not fail).
+    from mcp_server import db
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    db.init_schema(conn)
+    items = json.loads(cfg.backlog_file().read_text())
+    conn.executemany(
+        "INSERT INTO backlog_items (id, title, description, type, "
+        "implementation, claimed_risk, claimed_impact, area_hint, "
+        "priority_rank) VALUES (:id, :title, :description, :type, "
+        ":implementation, :claimed_risk, :claimed_impact, :area_hint, "
+        ":priority_rank)", items)
+    assert items[0]["implementation"] == "agent"

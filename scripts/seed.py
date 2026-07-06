@@ -41,8 +41,8 @@ def _reset_activity_board() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--project", default="candidate-app",
-                        help="project name under config/")
+    parser.add_argument("--project", required=True,
+                        help="project name under projects-config/")
     parser.add_argument("--if-empty", action="store_true",
                         help="seed only when the store has no backlog "
                              "(container boot: idempotent, never wipes)")

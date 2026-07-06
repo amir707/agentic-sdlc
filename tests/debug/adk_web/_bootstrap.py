@@ -34,8 +34,10 @@ def make_root_agent(step: str):
     import importlib
 
     project = load_project("candidate-app")
-    workspace = os.environ.get("CANDIDATE_APP_DIR",
-                               str(REPO_ROOT.parent / "candidate-app"))
+    workspace = os.environ.get(
+        "PROJECT_CHECKOUT_DIR",
+        os.environ.get("CANDIDATE_APP_DIR",
+                       str(REPO_ROOT.parent / "candidate-app")))
     spec_module = importlib.import_module(f"sdlc_steps.{step}.spec")
 
     # Per-step build arguments, mirroring orchestrator/driver.py.

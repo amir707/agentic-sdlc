@@ -8,9 +8,9 @@ run completes cleanly (a crashed run leaves it in place so resume is
 instant; `make reset-demo` clears it too). Nothing precious ever lives here.
 
 Locations: $AGENTIC_SDLC_SCRATCH, else <system tmp>/agentic-sdlc/, as
-<project>/checkout. CANDIDATE_APP_DIR (project .env) optionally pins
-the LOCATION somewhere inspectable — the engine still provisions and
-heals it there.
+<project>/checkout. PROJECT_CHECKOUT_DIR (project .env; legacy name
+CANDIDATE_APP_DIR) optionally pins the LOCATION somewhere inspectable —
+the engine still provisions and heals it there.
 
 Cloud note: this is exactly the ephemeral-worker pattern. A queue
 worker deployed to Cloud Run/GKE clones per task onto container disk;
@@ -44,7 +44,8 @@ def scratch_root() -> Path:
 
 
 def checkout_path(project_name: str) -> Path:
-    override = os.environ.get("CANDIDATE_APP_DIR")
+    override = (os.environ.get("PROJECT_CHECKOUT_DIR")
+                or os.environ.get("CANDIDATE_APP_DIR"))  # legacy name
     if override:
         return Path(override).resolve()
     return scratch_root() / project_name / "checkout"

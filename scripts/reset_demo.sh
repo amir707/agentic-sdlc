@@ -44,7 +44,7 @@ echo "== 3/4 redeploy baseline to Cloud Run (takes a minute or two) =="
 CANDIDATE_APP_DIR="$CAND" .venv/bin/python -m adapters.deploy baseline
 
 echo "== 4/4 reseed the store =="
-.venv/bin/python scripts/seed.py
+.venv/bin/python scripts/seed.py --project candidate-app
 
 echo
 echo "reset complete: baseline serving 100% traffic, store seeded, world clean."

@@ -15,6 +15,11 @@ Steps:
   6. seed the store
   7. optional baseline deploy + live smoke
 
+Onboarding a NEW project: pass --project <name> for a name with no
+bundle yet — setup scaffolds projects-config/<name>/ interactively
+(repo, service, approvers) with a sample backlog and a README that
+explains every extension point, then continues through the same steps.
+
 Usage: python3 scripts/setup.py [--project candidate-app]
 """
 
@@ -53,14 +58,20 @@ def _read_env(path: Path) -> dict[str, str]:
 
 
 def _write_env(path: Path, values: dict[str, str], example: Path) -> None:
-    """Fill the example template with values (idempotent merge)."""
+    """Fill the example template with values (idempotent merge).
+    Precedence: existing non-empty .env value > prompted value >
+    the template's own default (a scaffolded bundle pre-fills e.g.
+    CLOUD_RUN_SERVICE — that default must survive the merge)."""
     text = example.read_text()
     existing = _read_env(path)
     merged = {**values, **{k: v for k, v in existing.items() if v}}
     lines = []
     for line in text.splitlines():
-        key = line.split("=", 1)[0] if "=" in line and not line.startswith("#") else None
-        lines.append(f"{key}={merged.get(key, '')}" if key else line)
+        if "=" in line and not line.startswith("#"):
+            key, template_default = line.split("=", 1)
+            lines.append(f"{key}={merged.get(key, template_default)}")
+        else:
+            lines.append(line)
     path.write_text("\n".join(lines) + "\n")
 
 
@@ -74,11 +85,175 @@ def _prompt(existing: dict, key: str, label: str, secret_ok: bool = False) -> st
     return value
 
 
+PROJECT_YAML = """\
+# Project definition: {name}.
+# Everything the engine needs to know about this project lives in this
+# folder; the engine itself is project-agnostic.
+
+repo: {repo}
+
+cloud_run:
+  service: {service}
+
+# Deterministic module-to-area map: diff analysis assigns each changed
+# file the area of its first matching path prefix, else default_area.
+# Areas drive risk verification, incident scoping, and release holds —
+# refine these to match the repo's layout.
+areas:
+  {default_area}: []
+default_area: {default_area}
+
+# One representative endpoint per area: preprod smoke tests hit the
+# changed area's endpoint; the synthetic monitor probes all of them.
+smoke_endpoints:
+  {default_area}: /health
+"""
+
+PROJECT_ENV_EXAMPLE = """\
+# Project-scoped secrets for {name}. Copy to .env in this folder and
+# fill in. NEVER committed (projects-config/*/.env is gitignored).
+
+# Fine-grained PAT scoped to THIS project's repo only
+# (contents + pull requests, read/write).
+GITHUB_TOKEN=
+
+# Where this project deploys (deploy tool only; agents never see these).
+GCP_PROJECT=
+GCP_REGION=
+CLOUD_RUN_SERVICE={service}
+
+# Protects the governed app's config endpoint (if it has one).
+CONFIG_TOKEN=
+
+# OPTIONAL: pin the working checkout somewhere inspectable. When
+# unset, the engine provisions its own clone under the system tmp dir
+# (and deletes it after a clean run) — no local copy is required.
+#PROJECT_CHECKOUT_DIR=../{name}
+"""
+
+SAMPLE_BACKLOG = """\
+[
+  {{
+    "id": "SAMPLE-1",
+    "title": "Replace me: one small, well-groomed change",
+    "description": "REPLACE with a real item. The description is what the coder implements — be as specific as a good ticket.",
+    "type": "story",
+    "implementation": "agent",
+    "claimed_risk": "low",
+    "claimed_impact": "low",
+    "area_hint": "{default_area}",
+    "priority_rank": 1
+  }}
+]
+"""
+
+PROJECT_README = """\
+# {name} — project bundle
+
+Everything project-specific lives HERE; the engine stays untouched.
+Run a sprint with:
+
+    make seed PROJECT={name}
+    make orchestrate PROJECT={name}     # add PARALLEL=2 for two coders
+
+## What the governed repo must provide
+
+- Deployable via `gcloud run deploy --source`: a `Dockerfile`, or a
+  buildpack-detectable app (Python: `requirements.txt` + `main.py` or
+  a `Procfile`), listening on `$PORT`.
+- A `/health` endpoint (or adjust `smoke_endpoints` in project.yaml) —
+  preprod CI and the synthetic monitor probe it.
+- A test suite runnable as `python -m pytest` (the coder's run_tests
+  tool and preprod CI both use it).
+
+## Files
+
+- `project.yaml` — repo, Cloud Run service, area map, smoke endpoints.
+  Refine `areas` early: they drive verification and release holds.
+- `backlog.json` — the sprint input. Replace the SAMPLE item; keep the
+  same fields (`implementation`: agent | human).
+- `.env` (copy of `.env.example`) — this project's secrets.
+
+## Extending per step (overlays, all optional)
+
+Mirror the engine's step layout under `sdlc_steps/<step>/`:
+
+- `customised-prompt.md` — appended to the engine's base prompt for
+  that step; extends, never overrides its core rules.
+- `policy.yaml` — deep-merged over engine defaults. The ones that
+  matter first:
+  - `approver/policy.yaml` -> `approvers: [github-logins]` (REQUIRED —
+    who may /approve, /reject, /hold on PRs) and `gate_mode`
+  - `coder/policy.yaml` -> `protected_paths` (files the coder must
+    never write)
+  - `verify/policy.yaml` -> `sensitive_areas` (areas that force a
+    risk floor)
+  - `sprint_packer/policy.yaml` -> `risk_budget`, `token_budget`
+
+The full step list lives in the engine's `sdlc_steps/`; every step
+with a `prompts.md` accepts both overlay files. See
+`docs/architecture.md` (knowledge architecture) for the composition
+order.
+"""
+
+
+def _scaffold(project_dir: Path, name: str) -> None:
+    """Multi-turn bundle generation for a project the engine has never
+    seen: asks only what cannot be defaulted, writes the rest with
+    guidance comments."""
+    say(f"scaffolding projects-config/{name}/")
+    repo = input("  governed GitHub repo (owner/name)= ").strip()
+    if "/" not in repo:
+        fail("repo must be owner/name", "e.g. acme/shop-api")
+    service = input(f"  Cloud Run service name [{name}]= ").strip() or name
+    approvers = [a.strip() for a in input(
+        "  approver GitHub login(s), comma-separated= ").split(",")
+        if a.strip()]
+    if not approvers:
+        fail("at least one approver is required",
+             "these logins gate every merge via /approve on the PR")
+    default_area = input("  default area name [core]= ").strip() or "core"
+
+    project_dir.mkdir(parents=True)
+    (project_dir / "project.yaml").write_text(PROJECT_YAML.format(
+        name=name, repo=repo, service=service, default_area=default_area))
+    (project_dir / ".env.example").write_text(PROJECT_ENV_EXAMPLE.format(
+        name=name, service=service))
+    (project_dir / "backlog.json").write_text(
+        SAMPLE_BACKLOG.format(default_area=default_area))
+    approver_dir = project_dir / "sdlc_steps" / "approver"
+    approver_dir.mkdir(parents=True)
+    (approver_dir / "policy.yaml").write_text(
+        "# Who may decide the human gate (/approve, /reject, /hold).\n"
+        "approvers:\n" +
+        "".join(f"  - {a}\n" for a in approvers))
+    (project_dir / "README.md").write_text(PROJECT_README.format(name=name))
+    ok(f"bundle written — see projects-config/{name}/README.md for the "
+       "extension points")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", default="candidate-app")
+    parser.add_argument("--scaffold-only", action="store_true",
+                        help="generate the project bundle and stop "
+                             "(make try-setup wraps this)")
     args = parser.parse_args()
     project_dir = ROOT / "projects-config" / args.project
+
+    if not (project_dir / "project.yaml").exists():
+        if args.scaffold_only or input(
+                f"  no bundle for {args.project!r} — scaffold one now? "
+                "[Y/n] ").strip().lower() in ("", "y", "yes"):
+            _scaffold(project_dir, args.project)
+        else:
+            fail(f"no project {args.project!r}",
+                 "pick an existing folder under projects-config/ or let "
+                 "setup scaffold it")
+    elif args.scaffold_only:
+        ok(f"bundle for {args.project!r} already exists — nothing to do")
+    if args.scaffold_only:
+        return
 
     say("1/7 tooling")
     for tool, hint in (("gcloud", "https://cloud.google.com/sdk/docs/install"),
@@ -131,9 +306,15 @@ def main() -> None:
     else:
         p_values["CONFIG_TOKEN"] = secrets.token_urlsafe(24)
         ok("CONFIG_TOKEN generated")
-    default_dir = str((ROOT.parent / args.project).resolve())
-    p_values["CANDIDATE_APP_DIR"] = project_env.get("CANDIDATE_APP_DIR") or \
-        (input(f"  CANDIDATE_APP_DIR [{default_dir}]= ").strip() or default_dir)
+    checkout_key = ("PROJECT_CHECKOUT_DIR"
+                    if "PROJECT_CHECKOUT_DIR" in p_example.read_text()
+                    else "CANDIDATE_APP_DIR")  # legacy bundles
+    if not project_env.get(checkout_key):
+        pinned = input(
+            f"  {checkout_key} (optional — Enter to let the engine "
+            "provision its own checkout)= ").strip()
+        if pinned:
+            p_values[checkout_key] = pinned
     _write_env(p_path, p_values, p_example)
     p_env = _read_env(p_path)
 
@@ -149,10 +330,13 @@ def main() -> None:
         fail(f"GITHUB_TOKEN cannot read {repo} (HTTP {probe.stdout.strip()})",
              "check the PAT's repository access + permissions")
     ok(f"PAT can read {repo}")
-    if not Path(p_env["CANDIDATE_APP_DIR"]).joinpath(".git").exists():
-        fail(f"{p_env['CANDIDATE_APP_DIR']} is not a git checkout",
-             f"git clone https://github.com/{repo} {p_env['CANDIDATE_APP_DIR']}")
-    ok("candidate checkout present")
+    pinned = p_env.get(checkout_key)
+    if pinned and not Path(pinned).joinpath(".git").exists():
+        fail(f"{pinned} is not a git checkout",
+             f"git clone https://github.com/{repo} {pinned} — or unset "
+             f"{checkout_key} to let the engine provision its own")
+    ok("checkout pinned" if pinned else
+       "engine will provision its own checkout")
 
     say("4/7 GCP APIs")
     if run("gcloud", "projects", "describe", p_env["GCP_PROJECT"]).returncode != 0:
@@ -176,17 +360,46 @@ def main() -> None:
     ok(".venv ready")
 
     say("6/7 seed the store")
-    seed = run(str(ROOT / ".venv" / "bin" / "python"),
-               str(ROOT / "scripts" / "seed.py"), "--project", args.project)
+    import os
+    store_db = os.environ.get("DELIVERY_STORE_DB") or (
+        "delivery_store.sqlite3" if args.project == "candidate-app"
+        else f"delivery_store-{args.project}.sqlite3")  # same rule as make
+    seed = subprocess.run(
+        [str(ROOT / ".venv" / "bin" / "python"),
+         str(ROOT / "scripts" / "seed.py"), "--project", args.project],
+        cwd=ROOT, env={**os.environ, "DELIVERY_STORE_DB": store_db},
+        capture_output=True, text=True, timeout=120)
     if seed.returncode != 0:
         fail("seeding failed", seed.stderr[-200:])
     ok(seed.stdout.strip())
 
     say("7/7 baseline deploy (optional, several minutes)")
-    if input("  deploy candidate-app baseline to Cloud Run now? [y/N] "
+    if input(f"  deploy {args.project} baseline to Cloud Run now? [y/N] "
              ).strip().lower() == "y":
         import os
         os.environ.update(p_env)
+        if not os.environ.get("PROJECT_CHECKOUT_DIR"):
+            # deploy --source needs a working copy; the engine
+            # provisions its own (same as make deploy-baseline)
+            provision = subprocess.run(
+                [str(ROOT / ".venv" / "bin" / "python"), "-m",
+                 "orchestrator.provisioning", "--project", args.project],
+                cwd=ROOT, capture_output=True, text=True, timeout=300)
+            if provision.returncode != 0:
+                fail("could not provision the checkout",
+                     provision.stderr[-200:])
+            os.environ["PROJECT_CHECKOUT_DIR"] = provision.stdout.strip()
+            ok(f"checkout provisioned: {os.environ['PROJECT_CHECKOUT_DIR']}")
+        # Preflight before burning Cloud Build minutes: --source needs a
+        # Dockerfile or a buildpack-detectable app.
+        src = Path(os.environ["PROJECT_CHECKOUT_DIR"])
+        if not any((src / f).exists()
+                   for f in ("Dockerfile", "Procfile", "main.py", "app.py",
+                             "package.json", "go.mod")):
+            fail(f"{src} has no Dockerfile/Procfile/main.py — Cloud Run "
+                 "source deploy cannot build it",
+                 "make the governed repo deployable first (see the "
+                 "bundle README: 'What the governed repo must provide')")
         deploy = subprocess.run(
             [str(ROOT / ".venv" / "bin" / "python"), "-m", "adapters.deploy",
              "baseline"], cwd=ROOT)
@@ -197,8 +410,13 @@ def main() -> None:
     else:
         ok("skipped (make deploy-baseline later)")
 
-    say("done — next: make mcp | make monitor | make orchestrate "
-        "(three terminals), or scripts/demo.sh")
+    suffix = f" PROJECT={args.project}"
+    say(f"done — the store is seeded from {args.project}'s backlog.json. "
+        "Next, in separate terminals:\n"
+        f"    make mcp{suffix}\n"
+        f"    make monitor{suffix}\n"
+        f"    make orchestrate{suffix}\n"
+        f"  edited backlog.json? re-seed first: make seed{suffix}")
 
 
 if __name__ == "__main__":

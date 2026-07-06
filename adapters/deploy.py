@@ -41,7 +41,16 @@ def _base_args() -> list[str]:
 
 
 def _service() -> str:
-    return _env("CLOUD_RUN_SERVICE", "candidate-app")
+    return _env("CLOUD_RUN_SERVICE")
+
+
+def _source_dir() -> str:
+    value = (os.environ.get("PROJECT_CHECKOUT_DIR")
+             or os.environ.get("CANDIDATE_APP_DIR"))  # legacy name
+    if not value:
+        sys.exit("deploy: PROJECT_CHECKOUT_DIR is not set — provision "
+                 "one first (make deploy-baseline does both)")
+    return value
 
 
 def _run(args: list[str]) -> None:
@@ -73,7 +82,7 @@ def deploy_baseline() -> str:
     """Deploy candidate-app source serving 100% traffic."""
     _run([
         "gcloud", "run", "deploy", _service(),
-        "--source", _env("CANDIDATE_APP_DIR"),
+        "--source", _source_dir(),
         "--allow-unauthenticated",
         "--min-instances", "1", "--max-instances", "1",
         # CONFIG_TOKEN protects the chaos endpoint; value comes from the
@@ -98,7 +107,7 @@ def deploy_preprod(pr: int, source_dir: str | None = None) -> str:
     tag = f"pr-{pr}"
     _run([
         "gcloud", "run", "deploy", _service(),
-        "--source", source_dir or _env("CANDIDATE_APP_DIR"),
+        "--source", source_dir or _source_dir(),
         "--no-traffic", "--tag", tag,
         "--min-instances", "1", "--max-instances", "1",
         "--set-env-vars", f"CONFIG_TOKEN={_env('CONFIG_TOKEN')}",
