@@ -95,3 +95,21 @@ def test_base_workspace_still_works_sequentially(repos):
     assert len(sha) == 40
     assert "health.py" in ws.diff_against("main")
 
+
+
+def test_worktree_venv_symlink_survives_start_branch(repos):
+    """Regression: git clean -fd deletes a .venv SYMLINK (the ignore
+    pattern '.venv/' only matches real directories) — the coder's test
+    runner then dies on a missing interpreter."""
+    origin, base = repos
+    (base / ".venv").mkdir()          # stands in for the real venv
+    factory = WorkspaceFactory(base)
+    ws = factory.for_item("PAY-101")
+    assert (ws.dir / ".venv").is_symlink()
+    ws.start_branch("item/PAY-101-x")
+    assert (ws.dir / ".venv").exists(), "clean -fd must spare the venv link"
+    # a crashed run's worktree gets its link re-ensured
+    (ws.dir / ".venv").unlink()
+    ws2 = factory.for_item("PAY-101")
+    assert (ws2.dir / ".venv").is_symlink()
+    factory.cleanup()

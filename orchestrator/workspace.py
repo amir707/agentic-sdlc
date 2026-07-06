@@ -33,7 +33,11 @@ class Workspace:
         checkout and per-item worktrees."""
         self._git("fetch", "origin", base)
         self._git("checkout", "-f", "-B", branch, f"origin/{base}")
-        self._git("clean", "-fd")
+        # -e .venv: in worktrees the venv is a SYMLINK, which git's
+        # '.venv/' ignore pattern does not cover (trailing slash matches
+        # real directories only) — a bare clean deletes it and the next
+        # test run dies on a missing interpreter.
+        self._git("clean", "-fd", "-e", ".venv")
 
     def checkout(self, branch: str) -> None:
         self._git("fetch", "origin", branch)
@@ -81,10 +85,12 @@ class WorkspaceFactory:
                 ["git", "-C", str(self.base), "worktree", "add",
                  "--detach", "-f", str(target)],
                 capture_output=True, text=True, check=True)
-            venv = self.base / ".venv"
-            link = target / ".venv"
-            if venv.exists() and not link.exists():
-                link.symlink_to(venv)
+        # (Re)ensure the venv symlink even for a worktree left behind by
+        # a crashed run — its link may be gone.
+        venv = self.base / ".venv"
+        link = target / ".venv"
+        if venv.exists() and not link.exists():
+            link.symlink_to(venv)
         return Workspace(target)
 
     def cleanup(self) -> None:
