@@ -81,6 +81,13 @@ def deploy_baseline() -> str:
         "--set-env-vars", f"CONFIG_TOKEN={_env('CONFIG_TOKEN')}",
         *_base_args(),
     ])
+    # Traffic may be PINNED to a pr-N tag from a previous release —
+    # a plain deploy then leaves the new baseline revision at 0%.
+    # Baseline means baseline: force traffic back to latest.
+    _run([
+        "gcloud", "run", "services", "update-traffic", _service(),
+        "--to-latest", *_base_args(),
+    ])
     url = service_url()
     print(f"baseline live at {url}")
     return url
