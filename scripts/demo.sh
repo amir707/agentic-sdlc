@@ -78,8 +78,8 @@ pause "BEAT 6: now /approve the PAYMENTS PR on GitHub. Watch the
     the open incident (audited with factors). Then keep approving the
     other PRs as their dossiers arrive — each gets its own decision,
     and the catalog PRs MERGE one by one DURING the incident
-    (different area: the contrast is the point). Raise + enter the
-    human PR when prompted. Come back HERE when the orchestrator asks:
+    (different area: the contrast is the point). Come back HERE when
+    the orchestrator asks:
     'held PRs remain; run another release pass?'" \
     "confirm the hold happened and the sprint items are done"
 

@@ -171,7 +171,7 @@ def test_pack_matches_seeded_demo_scenario():
     assert by_id["PAY-103"] == "risk_budget"           # demo beat 1b (high after high)
     assert by_id["CAT-203"] == "risk_budget"           # medium, 0 points left
     assert by_id["CORE-303"] == "risk_budget"
-    # tokens: 60k+30k+30k spent of 140k -> 20k left refuses the 30k items
+    # tokens: 60k+30k+30k+30k = the full 150k -> nothing left for these
     assert by_id["CORE-302"] == "token_budget"
     assert by_id["CAT-204"] == "token_budget"
 

@@ -13,7 +13,7 @@ risk_budget: 2
 # Token spend is sprint capacity: capacity planning for AI developers.
 # Human-implemented items consume review capacity and risk points but
 # zero tokens (different capacity pools, same risk pool).
-token_budget: 140000
+token_budget: 150000
 
 # Review bandwidth is the bottleneck agent fleets actually hit.
 reviewer_capacity:
