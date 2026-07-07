@@ -98,28 +98,16 @@ gets appended to this file at the time it is run.
 
 ## 6. Cloud Run tidy-up: drop stale PR-preview tags and revisions
 
-Run when old `pr-N` preview tags pile up on the candidate app. Removes
-every 0%-traffic tag and deletes all revisions except the one serving
-traffic. Check the traffic split first and keep any tag still in use.
+Run when old `pr-N` preview tags pile up on a governed app's service.
+Scripted: removes every 0%-traffic tag and deletes every revision not
+serving traffic; serving revisions and their tags are never touched.
 
 ```bash
-SERVICE=candidate-app REGION=australia-southeast2
+scripts/cleanup_cloud_service.sh <service> [region] [project]
 
-# inspect: percent / revision / tag
-gcloud run services describe "$SERVICE" --region "$REGION" \
-  --format="value(status.traffic)"
-
-# remove stale tags (comma-separated list of the 0% ones)
-gcloud run services update-traffic "$SERVICE" --region "$REGION" \
-  --remove-tags pr-1,pr-2,...
-
-# delete every revision except the serving one
-SERVING=$(gcloud run services describe "$SERVICE" --region "$REGION" \
-  --format="value(status.traffic.filter(percent>0).revisionName)")
-for rev in $(gcloud run revisions list --service "$SERVICE" --region "$REGION" \
-    --format="value(metadata.name)" | grep -v "$SERVING"); do
-  gcloud run revisions delete "$rev" --region "$REGION" --quiet
-done
+# e.g. the two current projects:
+scripts/cleanup_cloud_service.sh candidate-app australia-southeast2 kaggle-codelab1
+scripts/cleanup_cloud_service.sh shopping-api  australia-southeast2 kaggle-codelab2
 ```
 
 ---
@@ -130,7 +118,8 @@ The engine itself moves to Cloud Run: the delivery store becomes a
 service, the orchestrator becomes a job. Everything in Part A stays
 valid (the same candidate-app service is the deploy target); Part B is
 additive. `make watch`/`make monitor` still run locally, pointed at the
-cloud store via DELIVERY_STORE_URL.
+cloud store via DELIVERY_STORE_URL. Day-to-day command reference (local
+vs cloud, per category): README, "Running it".
 
 ## 7. Cloud rung: delivery store + orchestrator on Cloud Run
 

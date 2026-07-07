@@ -2,7 +2,7 @@
 
 **The management layer that makes agent-written code shippable.**
 
-Everyone demos agents that write code. Sprint Governor demos what's
+Everyone demos agents that write code. Agentic SDLC demos what's
 missing above them: a system that governs a fleet of coding agents the
 way a good engineering manager governs a team — it plans a sprint under
 a risk budget and a token budget, verifies claimed risk against actual
@@ -87,16 +87,49 @@ One-time: `python3 scripts/setup.py` (validated, idempotent — collects
 model keys + a fine-grained GitHub PAT, generates role tokens, enables
 GCP APIs, seeds the store). Then, in separate terminals:
 
+Every world-selecting command names its project explicitly
+(`PROJECT=<name>`) — each project gets its own store file, and nothing
+guesses which world you mean.
+
+**Run the pipeline**
+
+| Command | Local rung | Cloud rung (runbook Part B) |
+|---|---|---|
+| store server | `make mcp PROJECT=x` | already running: the `delivery-store` Cloud Run service |
+| pipeline | `make orchestrate PROJECT=x [PARALLEL=2]` — gates pause for `/approve` comments on the PRs | `gcloud run jobs execute orchestrator --region $REGION` |
+| synthetic prober | `make monitor PROJECT=x` | `DELIVERY_STORE_URL="$STORE_URL" make monitor PROJECT=x` |
+
+**Observe**
+
+| Command | Local rung | Cloud rung |
+|---|---|---|
+| snapshot | `make status PROJECT=x` | `DELIVERY_STORE_URL="$STORE_URL" make status PROJECT=x` (curls the store's `/status` route) |
+| live view | `make watch PROJECT=x` | same `DELIVERY_STORE_URL` prefix (no live worker timers — the activity board is on the job's disk) |
+| pipeline logs | the orchestrate terminal | `gcloud beta run jobs logs tail orchestrator --region $REGION` |
+
+**Reset / seed / verify** (these open the SQLite file directly — local rung only)
+
 | Command | What it does |
 |---|---|
-| `make reset-demo` | full world reset: governed repo to baseline, branches deleted, baseline redeployed, store reseeded |
-| `make mcp PROJECT=<name>` | the delivery-store MCP server (localhost, per-role bearer tokens) |
-| `make monitor` | synthetic prober against the live Cloud Run URL |
-| `make orchestrate PROJECT=<name> [PARALLEL=2]` | the pipeline; gates pause for `/approve` comments on the PRs |
-| `make demo` | the conductor: chaos beats + closing receipts |
-| `make watch` | live view: who is doing what, sprint status, audit tail |
-| `make verify-demo` | deterministic eval: asserts the audit trail contains the expected decisions |
-| `make reset-item ITEM=X` | surgical single-item replay |
+| `make seed PROJECT=x` | destructive: wipe + reseed x's store from its `backlog.json` |
+| `make reset-item ITEM=Y PROJECT=x` | surgical single-item replay: close its PR, delete its branch, status → pending |
+| `make reset-demo` | candidate-app's full demo reset: repo to baseline, branches deleted, baseline redeployed, store reseeded |
+| `make demo` | the conductor: chaos beats + closing receipts (candidate-app rig) |
+| `make verify-demo PROJECT=x` | deterministic eval: asserts the audit trail contains the expected decisions |
+| `make try-setup NAME=x` | preview onboarding a new project: scaffold, inspect, keep or delete |
+
+For the cloud rung, `STORE_URL` is the delivery-store service plus
+`/mcp`:
+
+```bash
+STORE_URL="$(gcloud run services describe delivery-store \
+  --region "$REGION" --format='value(status.url)')/mcp"
+```
+
+`DELIVERY_STORE_URL` is the one switch: everything that talks to the
+store over MCP follows it to the cloud; the reset/seed/verify group
+opens the SQLite file directly and stays local (the runbook's Part B
+records the deploy sequence and this rung's caveats).
 
 The engine provisions its own checkout of the governed repo (cloned
 into tmp scratch, healed if broken, deleted after a clean run) — no
