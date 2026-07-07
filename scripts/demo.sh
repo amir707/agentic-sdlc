@@ -54,44 +54,56 @@ echo "live URL: $LIVE_URL"
 chaos off
 echo "known-good start: chaos OFF, service healthy"
 
-pause "BEATS 1-4 happen in the ORCHESTRATOR terminal:
-    start 'make orchestrate PROJECT=candidate-app PARALLEL=2' there now (if not already running).
-    Per item it codes, reviews, verifies, runs CI, then pauses at the
-    gate for your /approve comment on the GitHub PR. RELEASE IS
-    IMMEDIATE: each approval triggers a release decision on the spot,
-    one PR at a time.
-    THE ONE RULE: the FIRST dossier will be the PAYMENTS PR (PAY-101).
-    Do NOT /approve it yet — come back HERE first." \
-    "confirm the payments dossier is posted and NOT yet approved"
+pause "──────────────────────────────────────────────────────────
+ BEATS 1-4 · plan → code → review → verify → CI → dossier
+──────────────────────────────────────────────────────────
+ DO:    start (if not running), in the ORCHESTRATOR terminal:
+          make orchestrate PROJECT=candidate-app PARALLEL=2
+ WATCH: each item pauses at its gate with a dossier on its PR.
+        Approving = releasing: every /approve triggers an
+        immediate release decision, one PR at a time.
+
+ ⚠ THE ONE RULE ─ do NOT /approve any PAYMENTS PR yet.
+   Wait for its dossier to appear, then come back HERE." \
+    "confirm a payments dossier is posted and NOT yet approved"
 
 # --- beat 5: incident opens ------------------------------------------------------
 echo
-echo "BEAT 5: flipping chaos ON now — watch the MONITOR terminal:"
-echo "        payments error_rate climbs, then 'incident #N open'."
+echo "──────────────────────────────────────────────────────────"
+echo " BEAT 5 · chaos ON → the monitor discovers an incident"
+echo "──────────────────────────────────────────────────────────"
 chaos on
-pause "Wait for the monitor to print the incident (one ~15s window)." \
+pause " WATCH: the MONITOR terminal — payments error_rate climbs,
+        then 'incident #N open' (one ~15s window).
+ DO:    nothing — approve NOTHING until the incident is open." \
     "confirm the incident is open"
 
 # --- beat 6: hold + contrast -------------------------------------------------------
-pause "BEAT 6: now /approve the PAYMENTS PR on GitHub. Watch the
-    ORCHESTRATOR: its immediate release decision HOLDS that PR, citing
-    the open incident (audited with factors). Then keep approving the
-    other PRs as their dossiers arrive — each gets its own decision,
-    and the catalog PRs MERGE one by one DURING the incident
-    (different area: the contrast is the point). Come back HERE once
-    the orchestrator settles into its autonomous release rechecks:
-    '[release] held PRs remain — next pass in 45s'" \
+pause "──────────────────────────────────────────────────────────
+ BEAT 6 · the hold, and the contrast
+──────────────────────────────────────────────────────────
+ DO:    1. /approve the PAYMENTS PR on GitHub
+        2. keep approving the OTHER PRs as their dossiers arrive
+ WATCH: the ORCHESTRATOR —
+        · the payments PR is HELD, citing the incident (audited)
+        · the catalog PRs MERGE during the incident
+          (different area — the contrast is the point)
+ DONE WHEN it settles into:
+        '[release] held PRs remain — next pass in 45s'" \
     "confirm the hold happened and the sprint items are done"
 
 # --- beat 7: recovery + merge -------------------------------------------------------
 echo
-echo "BEAT 7: flipping chaos OFF now — watch the MONITOR terminal:"
-echo "        two consecutive healthy windows (~30s) let the resolver close it."
+echo "──────────────────────────────────────────────────────────"
+echo " BEAT 7 · recovery → the held PR merges BY ITSELF"
+echo "──────────────────────────────────────────────────────────"
 chaos off
-pause "After ~2 healthy windows, just WATCH the orchestrator: on its
-    next autonomous recheck the resolver closes the incident and the
-    held payments PR MERGES by itself (traffic shifts) — no human in
-    that loop. When the orchestrator exits, come back." \
+pause " DO:    nothing. Hands off — this beat is autonomous.
+ WATCH: MONITOR — two healthy windows (~30s) …
+        ORCHESTRATOR — on its next recheck the resolver closes
+        the incident and the held payments PR MERGES by itself
+        (traffic shifts). No human in that loop.
+ DONE WHEN the orchestrator exits." \
     "show the receipts (verify_demo + audit tail)"
 
 # --- receipts ---------------------------------------------------------------------
