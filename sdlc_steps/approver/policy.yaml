@@ -15,3 +15,9 @@ approvers: []
 #   nudge — block until the operator presses Enter (or resumes the ADK
 #           workflow suspend), then check exactly once
 gate_mode: poll
+
+# How long a poll-mode gate waits for the human before giving the item
+# up FOR THIS RUN (it stays awaiting_approval in the store; any later
+# run — manual, retry, or scheduler heartbeat — re-checks with one
+# look). Keeps an unattended orchestrator from idling forever.
+gate_wait_minutes: 5

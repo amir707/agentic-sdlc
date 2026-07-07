@@ -523,7 +523,10 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
 
 
 async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
-                            baseline: int) -> bool:
+                            baseline: int) -> bool | None:
+    """True = approved, False = rejected, None = no decision within the
+    gate wait budget (the item keeps awaiting_approval; a later run
+    resumes the gate with a single look)."""
     policy = ctx.project.policy("approver")
     approvers = policy["approvers"]
     mode = policy.get("gate_mode", "poll")
@@ -549,8 +552,17 @@ async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
                       flush=True)
                 continue
         else:
-            decision = await await_decision(ctx.repo_host, ctx.store, pr,
-                                            approvers, baseline=baseline)
+            wait = float(policy.get("gate_wait_minutes", 5)) * 60.0
+            try:
+                decision = await await_decision(
+                    ctx.repo_host, ctx.store, pr, approvers,
+                    baseline=baseline, timeout_seconds=wait)
+            except TimeoutError:
+                print(f"[gate] no decision on PR #{pr} within "
+                      f"{wait / 60:.0f}m — releasing this run; the item "
+                      "stays awaiting_approval and any rerun re-checks",
+                      flush=True)
+                return None
 
         if decision.kind == "approve":
             return True
@@ -869,7 +881,11 @@ async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     await ctx.set_status(item["id"], "preprod_passed")
     baseline = await run_approver(ctx, item, pr, verified)
     await ctx.set_status(item["id"], "awaiting_approval")
-    if not await run_approval_gate(ctx, item, pr, baseline):
+    gate = await run_approval_gate(ctx, item, pr, baseline)
+    if gate is None:
+        ctx.board.finish(item["id"], "gate wait budget exhausted")
+        return None
+    if not gate:
         await ctx.set_status(item["id"], "rejected")
         ctx.board.finish(item["id"], "rejected at gate")
         return None
