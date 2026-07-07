@@ -5,11 +5,11 @@
 # chaos toggles at the right story beats, and the closing receipts.
 #
 # Terminal layout for the demo:
-#   A: make mcp          (delivery store)
-#   B: make monitor      (live error rates — the star of beats 5 & 7)
-#   C: make orchestrate  (the pipeline; answer ITS prompts there)
+#   A: make mcp PROJECT=candidate-app          (delivery store)
+#   B: make monitor PROJECT=candidate-app      (live error rates — beats 5 & 7)
+#   C: make orchestrate PROJECT=candidate-app PARALLEL=2  (the pipeline)
 #   D: make demo         (THIS script: chaos beats + receipts)
-#   E: make watch        (optional: live workers + store view)
+#   E: make watch PROJECT=candidate-app        (live workers + store view)
 #
 # Every prompt below says what Enter does HERE and what you do in the
 # OTHER terminals. Nothing here reads orchestrator state; the live
@@ -49,13 +49,13 @@ echo "== preflight =="
 curl -sf "$LIVE_URL/health" >/dev/null \
     || { echo "candidate-app not healthy at $LIVE_URL"; exit 1; }
 curl -s -o /dev/null "http://127.0.0.1:${DELIVERY_STORE_PORT:-8787}/mcp" \
-    || { echo "delivery store not running -> start 'make mcp' first"; exit 1; }
+    || { echo "delivery store not running -> start 'make mcp PROJECT=candidate-app' first"; exit 1; }
 echo "live URL: $LIVE_URL"
 chaos off
 echo "known-good start: chaos OFF, service healthy"
 
 pause "BEATS 1-4 happen in the ORCHESTRATOR terminal:
-    start 'make orchestrate' there now (if not already running).
+    start 'make orchestrate PROJECT=candidate-app PARALLEL=2' there now (if not already running).
     Per item it codes, reviews, verifies, runs CI, then pauses at the
     gate for your /approve comment on the GitHub PR. RELEASE IS
     IMMEDIATE: each approval triggers a release decision on the spot,
