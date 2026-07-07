@@ -12,6 +12,18 @@ reasoning agent (an LLM decision loop over under-determined judgment)
 or a deterministic tool (solver, script, threshold check). Agent labels
 are earned by reasoning, not decoration.
 
+## Interaction sequence
+
+![Interaction sequence diagram](architecture-sequence.svg)
+
+Numbered flow: ⓪ `make seed` loads `backlog.json` into the store · ①
+the orchestrator reads items and writes status/audit/tokens back over
+MCP · ② coder work becomes a PR · ③ the review⇄fix loop happens on
+the PR · ④–⑤ the human reads the dossier and comments `/approve`,
+which the gate polls · ⑥ release manager merges + shifts traffic ·
+⑦–⑧ the monitor probes the live service and opens/closes incidents in
+the store.
+
 ## Pipeline
 
 ```mermaid

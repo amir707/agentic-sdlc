@@ -35,6 +35,8 @@ real PRs there.
 
 ## Architecture
 
+![Agentic SDLC — interaction sequence: seed loads the backlog into the MCP delivery store; the orchestrator runs each item through the SDLC steps, opens PRs on GitHub, waits for a human /approve, and releases to Cloud Run while the monitor probes it](docs/architecture-sequence.svg)
+
 Thin reasoning agents over a thick deterministic substrate — see
 [docs/architecture.md](docs/architecture.md) for the pipeline diagram,
 the honest agent-vs-tool classification, and the knowledge
