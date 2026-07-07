@@ -283,3 +283,30 @@ gcloud run jobs executions list --job orchestrator --region "$REGION"
 # cancel it (SIGTERM, ~10s grace)
 gcloud run jobs executions cancel <EXECUTION-NAME> --region "$REGION" --quiet
 ```
+
+## 12. Tear down: stop the hourly bill after testing
+
+Both Cloud Run services run with min-instances=1 (the governed app for
+per-instance chaos state, the store for its container-disk world) and
+the store adds --no-cpu-throttling — always-on instances bill EVERY
+HOUR whether or not anything runs. Idle jobs and secrets cost ~nothing.
+
+```bash
+REGION=australia-southeast2
+
+# the always-on pieces (the actual money):
+gcloud run services delete delivery-store --region "$REGION" --quiet
+gcloud run services delete candidate-app  --region "$REGION" --quiet
+# cheaper alternative if you want the demo resumable: scale to zero
+#   gcloud run services update <svc> --region "$REGION" --min-instances=0
+
+# tidiness (near-zero cost while idle):
+gcloud run jobs delete orchestrator --region "$REGION" --quiet
+gcloud scheduler jobs delete orchestrator-heartbeat \
+  --location "$REGION" --quiet             # if section 10 was used
+gcloud artifacts repositories delete agentic-sdlc \
+  --location "$REGION" --quiet             # image storage
+
+# stale PR revisions/tags on a service you are KEEPING: section 6
+# (scripts/cleanup_cloud_service.sh) trims them without teardown.
+```

@@ -1,6 +1,6 @@
 # Agentic SDLC
 
-**The management layer that makes agent-written code shippable.**
+**The governance layer that decides whether — and when — agent-written code ships.**
 
 Everyone demos agents that write code. Agentic SDLC demos what's
 missing above them: a system that governs a fleet of coding agents the
@@ -10,11 +10,16 @@ diffs, gates approvals through humans, and makes incident-aware release
 decisions against a live deployed service.
 
 Built for the Kaggle "AI Agents: Intensive Vibe Coding Capstone
-Project" (Agents for Business track). The SDLC runtime and its integrations are project-agnostic;
-the governed service lives in its own repo:
-[candidate-app](https://github.com/amir707/candidate-app) — agents open
-real PRs there — and everything specific to it lives under
-`projects-config/candidate-app/`.
+Project" (Agents for Business track).
+
+The engine is project-agnostic: each governed project lives in its own
+repo, and every per-project customisation (policies, prompts, area
+maps, backlog) lives here under `projects-config/<project-name>/` — a
+folder per project, which is the practical multi-project answer at
+capstone scale (a config service would be the production successor).
+The demo project is
+[candidate-app](https://github.com/amir707/candidate-app); agents open
+real PRs there.
 
 ## Three ideas to steal
 
@@ -39,31 +44,22 @@ structural guarantees in
 
 ## Repository map
 
-```
-sdlc_steps/       ONE FOLDER PER WORKER holding everything the worker is:
-                  its knowledge (prompts.md, policy.yaml) and its code
-                  (__init__.py implementation for deterministic workers —
-                  sprint_packer, verify, preprod_ci, incident_resolver,
-                  monitor — and spec.py model+tool wiring for reasoning
-                  workers — risk_assessor, coder, code_reviewer, approver,
-                  release_manager). Root policy.yaml holds shared keys.
-orchestrator/     the SDLC process runtime: definition.py (the pipeline as data),
-                  driver.py (sequential executor), and execution mechanics
-                  (config overlays, invoker, git workspace, approval gate,
-                  rejection, dependency graph, agent helpers)
-projects-config/  one folder per governed project: project.yaml (repo,
-                  areas, smoke endpoints), backlog.json (seed), .env
-                  (project tokens, gitignored), and sdlc_steps/<step>/
-                  overlays (customised-prompt.md, policy.yaml) mirroring
-                  the root hierarchy
-tools/            agent-facing tools: fs_tools (sandboxed workspace edits
-                  and tests), diff_analysis (pull request diff parser)
-adapters/         boundary adapters: repo_host (GitHub REST API),
-                  store_client (MCP store client), deploy (Cloud Run deployer)
-mcp_server/       the delivery-store MCP server (single source of truth)
-scripts/          demo driver, deterministic eval, seeder, setup
-docs/             architecture, invariants, ADRs, setup runbook
-```
+| Folder | What lives there |
+|---|---|
+| `sdlc_steps/` | **one folder per worker** — everything a worker *is*: its knowledge (`prompts.md`, `policy.yaml`) and its code. Root `policy.yaml` holds shared keys |
+| `orchestrator/` | the process runtime: `definition.py` (the pipeline as data), `driver.py` (the executor), and mechanics (config overlays, invoker port, git workspace, gate, rejection, dependency graph) |
+| `projects-config/` | **one folder per governed project**: `project.yaml` (repo, areas, smoke endpoints), `backlog.json`, `.env` (gitignored), and `sdlc_steps/<step>/` overlays mirroring the root hierarchy |
+| `adapters/` | boundary adapters: GitHub REST (`repo_host`), MCP store client, Cloud Run deployer — plus `adapters/adk/`, the ONE package that speaks ADK |
+| `mcp_server/` | the delivery-store MCP server — the single source of truth |
+| `tools/` | agent-facing tools: sandboxed workspace (`fs_tools`), diff analysis |
+| `scripts/` | demo conductor, deterministic eval, seeder, setup, resets |
+| `docs/` | architecture, design invariants, ADRs, setup runbook |
+
+Inside `sdlc_steps/`, a worker's code takes one of two shapes —
+`__init__.py` implementations for the **deterministic** workers
+(sprint_packer, verify, preprod_ci, incident_resolver, monitor),
+`spec.py` model+tool wiring for the **reasoning** ones (risk_assessor,
+coder, code_reviewer, approver, release_manager).
 
 Composition per invocation: base `sdlc_steps/<step>/prompts.md` (opens
 with immutable core rules) → project
@@ -135,22 +131,42 @@ The engine provisions its own checkout of the governed repo (cloned
 into tmp scratch, healed if broken, deleted after a clean run) — no
 local copy needs to exist.
 
+> **💸 Cost caveat:** both Cloud Run services (the governed app and,
+> on the cloud rung, the delivery store) run with `min-instances=1` —
+> always-on instances **bill every hour**, demo or no demo. When you
+> finish testing, tear them down (or scale to zero):
+> [setup-runbook §12](docs/setup-runbook.md) has the commands, and §6
+> trims stale PR revisions/tags on services you keep.
+
 ## Security model
 
-Capability enforcement over prompt enforcement: agents cannot be talked
-out of what they have no tool to do. Merging without human approval is
-structurally impossible; the audit log is append-only because no
-mutation tool exists; the coder's entire effect surface is four
-sandboxed workspace functions. The human gate is identity-checked
-(allowlisted GitHub logins; unauthorized commands are ignored and
-audited). Least privilege throughout: per-role store tokens (only the
-monitor opens incidents, only the resolver closes them), per-agent tool
-filters, credential isolation (agents never hold cloud or GitHub
-credentials). No secrets in code or git history. A deterministic merge
-gate re-verifies and preprod-deploys any head lacking evidence before
-it can ship. Local trust model stated honestly: localhost bearer tokens
-are the demo-scale rung; the production ladder (MCP OAuth, workload
-identity, secret manager) leaves the tool-surface scoping unchanged.
+The governing principle: **capability enforcement over prompt
+enforcement** — agents cannot be talked out of what they have no tool
+to do.
+
+- **No merge without a human.** Structurally impossible, not
+  prompt-discouraged: the release manager only ever receives PRs that
+  carry a human approval record from the gate.
+- **Append-only audit log** — by construction: the store exposes no
+  update or delete tool for the audit table.
+- **Sandboxed coder.** Its entire effect surface is four workspace
+  functions (list/read/write/run-tests) inside one checkout — no git,
+  no network, no credentials, no paths outside.
+- **Identity-checked human gate.** Decisions are `/approve`, `/reject`,
+  `/hold` comments from allowlisted GitHub logins; unauthorized
+  commands are ignored *and audited*.
+- **Least privilege throughout.** Per-role store tokens (only the
+  monitor opens incidents, only the resolver closes them), per-agent
+  tool filters.
+- **Credential isolation.** Agents never hold cloud or GitHub
+  credentials — deploys go through the deterministic deploy tool,
+  pushes through the engine. No secrets in code or git history.
+- **Deterministic merge gate.** Any head lacking preprod evidence is
+  re-verified and re-deployed before it can ship — including commits
+  landing after approval.
+- **Honest trust ladder.** Localhost bearer tokens are the demo-scale
+  rung; the production rungs (MCP OAuth, workload identity, secret
+  manager) change transport, never the tool-surface scoping.
 
 ## Evals
 
@@ -163,29 +179,37 @@ dataset for the risk assessor in the Vertex evaluation schema.
 
 State is externalized (GitHub + the store behind MCP), so each runtime
 choice has a drop-in successor that leaves agents and the MCP surface
-untouched: the for-loop scheduler becomes a work queue; the blocking
-gate becomes a webhook-resumed suspension (the ADK Workflow expression
-in `adapters/adk/workflow.py` already renders the pipeline as a
-resumable graph); SQLite becomes Postgres behind the same tools; local
-credentials become workload identity; the tmp-scratch checkout becomes
-the ephemeral-worker clone it already imitates. The release-governance
-slice (verify, monitor/resolver, release manager) is deployable to a
-real team in ADVISORY MODE almost immediately: it comments "I would
-hold this, and why" without merging, building the trust data that
-would justify autonomy later.
+untouched:
+
+- **Scheduler**: the for-loop driver → a work queue.
+- **Gate**: blocking poll → webhook-resumed suspension (the ADK
+  Workflow expression in `adapters/adk/workflow.py` already renders
+  the pipeline as a resumable graph).
+- **Store**: SQLite → Postgres behind the same MCP tools.
+- **Credentials**: local tokens → workload identity.
+- **Checkout**: the tmp-scratch clone → the ephemeral-worker clone it
+  already imitates.
+
+The credible first deployment: the release-governance slice (verify,
+monitor/resolver, release manager) runs against a real team in
+**advisory mode** almost immediately — it comments "I would hold this,
+and why" without merging, building the trust data that would justify
+autonomy later.
 
 ## Honest limitations
 
-Real delivery is a state machine with many back-edges; this build
-implements the ones that matter most (review-fix loop, flag-policy
-return, human-gate rejection, escalation with human override,
-post-approval re-verification) and admits the rest as data. The
-groomed-backlog assumption does the heaviest lifting — the messy left
-half of the SDLC (ambiguity, discovery, negotiation) is out of scope.
-The toy candidate app flatters every agent: real risk assessment runs
-on tribal knowledge and large-codebase blast radii. Merge conflicts are
-detected and escalated, never auto-resolved. And the demo compresses a
-sprint into minutes; we do not claim it runs a real team's sprint
-today — the defensible claim is a real solution to the
-build-to-release governance slice, demonstrated on a deliberately
-compressed substrate.
+- **Fewer back-edges than real delivery.** The ones that matter most
+  are built (review-fix loop, flag-policy return, human-gate
+  rejection, escalation with human override, post-approval
+  re-verification); the rest are admitted as data in the pipeline
+  definition.
+- **The groomed-backlog assumption does the heaviest lifting.** The
+  messy left half of the SDLC — ambiguity, discovery, negotiation —
+  is out of scope.
+- **The toy candidate app flatters every agent.** Real risk assessment
+  runs on tribal knowledge and large-codebase blast radii.
+- **Merge conflicts are detected and escalated, never auto-resolved.**
+- **The demo compresses a sprint into minutes.** We do not claim it
+  runs a real team's sprint today — the defensible claim is a real
+  solution to the build-to-release governance slice, demonstrated on
+  a deliberately compressed substrate.
