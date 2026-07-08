@@ -20,9 +20,15 @@ cd "$(dirname "$0")/.."
 
 PYTHON=.venv/bin/python
 
+# Which project's world to conduct. Passed by `make demo PROJECT=<name>`
+# (defaults to candidate-app so the bare `make demo` keeps working).
+PROJECT="${PROJECT:-candidate-app}"
+PROJECT_ENV="projects-config/$PROJECT/.env"
+[ -f "$PROJECT_ENV" ] || { echo "no bundle for '$PROJECT' at $PROJECT_ENV"; exit 1; }
+
 set -a
 source .env
-source projects-config/candidate-app/.env
+source "$PROJECT_ENV"
 set +a
 
 LIVE_URL="$($PYTHON -m adapters.deploy url)"
@@ -45,11 +51,11 @@ pause() {
 }
 
 # --- preflight ----------------------------------------------------------------
-echo "== preflight =="
+echo "== preflight ($PROJECT) =="
 curl -sf "$LIVE_URL/health" >/dev/null \
-    || { echo "candidate-app not healthy at $LIVE_URL"; exit 1; }
+    || { echo "$PROJECT not healthy at $LIVE_URL"; exit 1; }
 curl -s -o /dev/null "http://127.0.0.1:${DELIVERY_STORE_PORT:-8787}/mcp" \
-    || { echo "delivery store not running -> start 'make mcp PROJECT=candidate-app' first"; exit 1; }
+    || { echo "delivery store not running -> start 'make mcp PROJECT=$PROJECT' first"; exit 1; }
 echo "live URL: $LIVE_URL"
 chaos off
 echo "known-good start: chaos OFF, service healthy"

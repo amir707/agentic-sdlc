@@ -59,7 +59,7 @@ reset-item:
 	$(PYTHON) scripts/reset_item.py --item $(ITEM) --project $(PROJECT)
 
 demo:
-	bash scripts/demo.sh
+	PROJECT=$(PROJECT) bash scripts/demo.sh
 
 # local store: read the SQLite file directly; cloud store (run with
 # DELIVERY_STORE_URL=https://.../mcp): curl its /status route
