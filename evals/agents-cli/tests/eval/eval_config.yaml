@@ -1,0 +1,86 @@
+# Local, deterministic grading — no Vertex, no GCP project, no cost.
+# The risk assessor's output is a STRUCTURED tool call (record_assessment),
+# not prose, so an LLM-judge on text is the wrong instrument. This metric
+# reads the tool call straight from the trace and checks risk / effort /
+# recommend_split against the expected assessment for the item in the
+# prompt. execution: local (the default) keeps it in-process.
+metrics_to_run:
+  - assessment_matches_expected
+
+custom_metrics:
+  - name: assessment_matches_expected
+    custom_function: |
+      import json, re
+
+      # Expected assessment per backlog item (the dataset's references,
+      # as structured truth). Keyed by item id, which is parsed from the
+      # prompt — robust to whether the trace preserves eval_case_id or
+      # the reference field.
+      EXPECTED = {
+          "PAY-101":  {"risk": "high",   "effort": "M", "split": False},
+          "CAT-201":  {"risk": "low",    "effort": "S", "split": False},
+          "PAY-102":  {"risk": "low",    "effort": "S", "split": False},
+          "CORE-301": {"risk": "medium", "effort": "L", "split": True},
+      }
+
+      def _walk(node):
+          """Yield every dict in a nested dict/list structure."""
+          if isinstance(node, dict):
+              yield node
+              for v in node.values():
+                  yield from _walk(v)
+          elif isinstance(node, list):
+              for v in node:
+                  yield from _walk(v)
+
+      def _find_call(instance, name):
+          """Return the args of the first function_call named `name`."""
+          for d in _walk(instance):
+              call = d.get("function_call") if isinstance(d, dict) else None
+              if isinstance(call, dict) and call.get("name") == name:
+                  return call.get("args") or {}
+          return None
+
+      def _prompt_text(instance):
+          """Concatenate every text part so we can find the item id."""
+          texts = []
+          for d in _walk(instance):
+              t = d.get("text") if isinstance(d, dict) else None
+              if isinstance(t, str):
+                  texts.append(t)
+          return "\n".join(texts)
+
+      def evaluate(instance):
+          text = _prompt_text(instance)
+          m = re.search(r'"id"\s*:\s*"([A-Z]+-\d+)"', text)
+          if not m or m.group(1) not in EXPECTED:
+              return {"score": 0.0,
+                      "explanation": "could not identify the backlog item "
+                                     "id in the prompt"}
+          item = m.group(1)
+          exp = EXPECTED[item]
+
+          args = _find_call(instance, "record_assessment")
+          if args is None:
+              return {"score": 0.0,
+                      "explanation": f"{item}: agent never called "
+                                     "record_assessment"}
+
+          got_risk = str(args.get("risk", "")).lower()
+          got_effort = str(args.get("effort", "")).upper()
+          got_split = bool(args.get("recommend_split", False))
+
+          checks = {
+              "risk": (got_risk, exp["risk"]),
+              "effort": (got_effort, exp["effort"]),
+              "recommend_split": (got_split, exp["split"]),
+          }
+          misses = [f"{k}: got {g!r} want {w!r}"
+                    for k, (g, w) in checks.items() if g != w]
+          score = 1.0 - len(misses) / len(checks)
+          if misses:
+              return {"score": round(score, 3),
+                      "explanation": f"{item}: " + "; ".join(misses)}
+          return {"score": 1.0,
+                  "explanation": f"{item}: risk/effort/split all match "
+                                 f"({got_risk}, {got_effort}, split={got_split})"}

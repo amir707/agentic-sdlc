@@ -1,0 +1,39 @@
+[project]
+# Self-contained agents-cli eval harness for the risk assessor. It is a
+# SEPARATE uv project on purpose: `agents-cli eval generate` runs
+# `uv sync --extra eval` in its own root, which the framework-neutral
+# parent repo (requirements.txt + .venv, ADR-0007) deliberately isn't.
+# The agent itself is NOT reimplemented here — risk_assessor_agent/agent.py
+# builds it from the parent repo's real spec via the same adapter the
+# pipeline uses. These deps are only what that agent needs at import/run.
+name = "risk-assessor-eval"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "google-adk[db]>=2.0.0,<3.0.0",
+    "mcp>=1.10",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# `agents-cli eval generate` runs `uv sync --dev --extra eval`; this extra
+# must exist. google-adk[eval] pulls the local grading deps. No Vertex
+# needed — grading is a local custom_function (execution: local).
+eval = [
+    "google-adk[eval]>=2.0.0,<3.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.0.0",
+    "nest-asyncio>=1.6.0",
+]
+
+[tool.uv]
+# Nothing to build/install for this project itself; it only hosts the
+# manifest, the agent stub, and the eval dataset/config.
+package = false

@@ -1,0 +1,88 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "pay_101_financial_contract_is_high",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\n  \"task\": \"Assess this backlog item and record your judgment via record_assessment.\",\n  \"item\": {\n    \"id\": \"PAY-101\",\n    \"title\": \"Add refund totals to the payments summary\",\n    \"description\": \"Finance wants a refunded_total figure (AUD) included in GET /payments/summary alongside the captured and pending totals. This changes the reported financial figures that finance dashboards consume, so the response contract is sensitive. Include tests covering the new field.\",\n    \"type\": \"story\",\n    \"implementation\": \"agent\",\n    \"claimed_risk\": \"high\",\n    \"claimed_impact\": \"high\",\n    \"area_hint\": \"payments\",\n    \"priority_rank\": 1\n  }\n}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "risk=high (payments-path change altering reported financial figures), effort=M, recommend_split=false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "cat_201_additive_catalog_is_low",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\n  \"task\": \"Assess this backlog item and record your judgment via record_assessment.\",\n  \"item\": {\n    \"id\": \"CAT-201\",\n    \"title\": \"Show item count in catalog listing\",\n    \"description\": \"Add a count field to the GET /catalog/items response so clients can render totals without counting the array themselves. Purely additive; existing fields unchanged. Small change with a test.\",\n    \"type\": \"story\",\n    \"implementation\": \"agent\",\n    \"claimed_risk\": \"low\",\n    \"claimed_impact\": \"medium\",\n    \"area_hint\": \"catalog\",\n    \"priority_rank\": 2\n  }\n}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "risk=low (additive, isolated, outside sensitive paths), effort=S, recommend_split=false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "pay_102_innocent_summary_field_reads_low",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\n  \"task\": \"Assess this backlog item and record your judgment via record_assessment.\",\n  \"item\": {\n    \"id\": \"PAY-102\",\n    \"title\": \"Add service-fee line to payments summary\",\n    \"description\": \"Ops wants a service_fee figure shown in the summary reporting their dashboard consumes, computed as a fixed 1.5% of captured totals. Just one more display field on a summary payload.\",\n    \"type\": \"story\",\n    \"implementation\": \"agent\",\n    \"claimed_risk\": \"low\",\n    \"claimed_impact\": \"medium\",\n    \"area_hint\": \"core\",\n    \"priority_rank\": 3\n  }\n}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "risk=low (as described: an additive display field with no sensitive path indicated \u2014 the claimed-vs-actual guardrail exists precisely because such claims can be wrong), effort=S, recommend_split=false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "core_301_cross_cutting_L_recommends_split",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "{\n  \"task\": \"Assess this backlog item and record your judgment via record_assessment.\",\n  \"item\": {\n    \"id\": \"CORE-301\",\n    \"title\": \"Per-user rate limiting on all endpoints\",\n    \"description\": \"Introduce per-user rate limiting middleware across every route: request counting per caller, configurable limits per endpoint class, 429 responses with Retry-After, and limit-exemption for health checks. Touches request handling on every path in the service.\",\n    \"type\": \"story\",\n    \"implementation\": \"agent\",\n    \"claimed_risk\": \"medium\",\n    \"claimed_impact\": \"high\",\n    \"area_hint\": \"core\",\n    \"priority_rank\": 5\n  }\n}"
+          }
+        ]
+      },
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "risk=medium (touches request handling on every route), effort=L, recommend_split=true (L effort at medium risk: split before sprinting)"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

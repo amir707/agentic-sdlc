@@ -1,0 +1,4 @@
+.venv/
+artifacts/
+uv.lock
+__pycache__/
