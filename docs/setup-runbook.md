@@ -110,6 +110,13 @@ scripts/cleanup_cloud_service.sh candidate-app australia-southeast2 kaggle-codel
 scripts/cleanup_cloud_service.sh shopping-api  australia-southeast2 kaggle-codelab2
 ```
 
+"Serving" means MAIN-URL traffic (`percent > 0`), read live from the
+API each run. A revision reachable only through its `pr-N---…` preview
+tag URL sits at `percent 0`, so the script treats it as disposable and
+deletes it — that is the intent. If you are actively demoing off a
+preview URL, remove that `pr-N` from the argument list first. The
+script fails closed: a malformed traffic block aborts before any delete.
+
 ---
 
 # Part B — GOOGLE CLOUD rung
@@ -310,3 +317,36 @@ gcloud artifacts repositories delete agentic-sdlc \
 # stale PR revisions/tags on a service you are KEEPING: section 6
 # (scripts/cleanup_cloud_service.sh) trims them without teardown.
 ```
+
+### 12a. Full teardown of ONE governed app service
+
+For a single service in any project (e.g. a second project's app like
+`shopping-api` in kaggle-codelab2), removing the service alone stops
+~all the cost; the two extra steps reclaim a few cents/month of image
+and source storage. Parameterized for replay:
+
+```bash
+SERVICE=shopping-api
+REGION=australia-southeast2
+PROJECT=kaggle-codelab2
+
+# 1. the service — stops instance billing immediately, removes every
+#    revision and tag with it:
+gcloud run services delete "$SERVICE" \
+  --region "$REGION" --project "$PROJECT" --quiet
+
+# 2. its container images (skip if this repo holds OTHER services'
+#    images — delete just the package instead of the whole repo):
+gcloud artifacts repositories delete cloud-run-source-deploy \
+  --location "$REGION" --project "$PROJECT" --quiet
+
+# 3. the --source upload bucket (build tarballs):
+gcloud storage rm --recursive \
+  "gs://run-sources-${PROJECT}-${REGION}" --project "$PROJECT"
+```
+
+Not reversible (no soft-delete) but fully reproducible: `gcloud run
+deploy --source` rebuilds the service and recreates the registry repo
+and bucket. Leave the deploy service account and the project itself in
+place unless you are done with the project entirely. Step 1 alone is
+enough to stop the bleed while keeping the service redeployable.
