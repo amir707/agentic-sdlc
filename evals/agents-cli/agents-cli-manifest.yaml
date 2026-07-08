@@ -1,0 +1,6 @@
+name: "risk-assessor-eval"
+acli_version: "0.6.0"
+# eval generate loads the ADK root_agent from <agent_directory>/agent.py
+agent_directory: "risk_assessor_agent"
+region: "us-east1"
+language: "python"
