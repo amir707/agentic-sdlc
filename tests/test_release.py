@@ -66,3 +66,33 @@ def test_release_pass_delegates_to_the_release_executor():
                           release_executor=FakeExecutor())
     asyncio.run(driver.run_release_pass(ctx))
     assert calls == ["pass"]
+
+
+def test_repo_host_error_escalates_the_item_not_the_pass():
+    """Live-found regression: the store said `queued, pr=3` but the repo
+    (recreated from baseline) had no PR #3 — the 404 killed the whole
+    release workflow. A repo-host failure must escalate THAT item and
+    return an outcome the graph can route past."""
+    from adapters.repo_host import RepoHostError
+
+    class ExplodingRepoHost:
+        def get_pr(self, pr):
+            raise RepoHostError(f"GET /pulls/{pr}: 404 Not Found")
+
+    audits, statuses = [], []
+
+    class Ctx:
+        repo_host = ExplodingRepoHost()
+
+        async def audit(self, actor, decision, factors):
+            audits.append((actor, decision, factors))
+
+        async def set_status(self, item_id, status, pr=None):
+            statuses.append((item_id, status, pr))
+
+    outcome = asyncio.run(driver.decide_release_pr(
+        Ctx(), {"id": "CAT-202", "pr": 3}, confidence=10))
+    assert outcome == "escalated"
+    assert ("CAT-202", "escalated", 3) in statuses
+    assert any(d == "escalate_to_human" and "repo host" in f["rule"]
+               for _, d, f in audits)
