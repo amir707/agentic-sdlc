@@ -48,7 +48,7 @@ def build_release_workflow(ctx) -> Workflow:
     crashed pass re-invoked simply reloads the queue (merged PRs are no
     longer `queued`) and continues."""
     state: dict = {
-        "queue": [], "index": 0,
+        "queue": [], "index": 0, "outcomes": [],
         "confidence": ctx.project.policy(
             "release_manager")["deploy_confidence_minutes"],
     }
@@ -61,17 +61,26 @@ def build_release_workflow(ctx) -> Workflow:
         return Event(output="incidents reconciled")
 
     async def load_queue(node_input):
+        # Reset the walk cursor HERE, not only at build time: the resident
+        # release service reuses ONE workflow instance across many trigger
+        # events, so every pass must start its walk from the front.
+        state["index"] = 0
+        state["outcomes"] = []
         state["queue"] = await driver.release_queue(ctx)
         if not state["queue"]:
             ctx.board.finish("RELEASE", "queue empty")
             print("[release] queue empty", flush=True)
             return Event(output={"outcome": "empty"}, route="empty")
+        listing = ", ".join(f"#{i['pr']} ({i['id']})" for i in state["queue"])
+        print(f"[release] queue: {len(state['queue'])} PR(s) — {listing} "
+              "(one decision, one deployment at a time)", flush=True)
         return Event(output=len(state["queue"]), route="has_items")
 
     async def decide_pr(node_input):
         item = state["queue"][state["index"]]
         outcome = await driver.decide_release_pr(ctx, item,
                                                  state["confidence"])
+        state["outcomes"].append((item["pr"], outcome))
         return Event(output={"pr": item["pr"], "outcome": outcome})
 
     def advance(node_input):
@@ -82,6 +91,12 @@ def build_release_workflow(ctx) -> Workflow:
 
     def done(node_input):
         ctx.board.finish("RELEASE", "pass complete")
+        if state["outcomes"]:
+            tally: dict[str, int] = {}
+            for _, outcome in state["outcomes"]:
+                tally[outcome] = tally.get(outcome, 0) + 1
+            summary = ", ".join(f"{n} {kind}" for kind, n in tally.items())
+            print(f"[release] pass complete: {summary}", flush=True)
         return {"outcome": "pass_complete"}
 
     nodes = {"incident_hygiene": incident_hygiene, "load_queue": load_queue,

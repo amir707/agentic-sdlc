@@ -4,6 +4,8 @@
 PYTHON := .venv/bin/python
 PROJECT ?= candidate-app
 PARALLEL ?= 1
+HEARTBEAT ?= 5
+RELEASE_URL ?=
 
 include .env
 -include projects-config/$(PROJECT)/.env
@@ -50,6 +52,20 @@ orchestrate:
 release:
 	$(require_project)
 	$(PYTHON) -m orchestrator.release --project $(PROJECT)
+
+# The RESIDENT release manager: stays awake listening; runs one release
+# pass per event (Pub/Sub push in the cloud, HTTP POST locally).
+release-service:
+	$(require_project)
+	$(PYTHON) -m orchestrator.release_service --project $(PROJECT) --heartbeat-minutes $(HEARTBEAT)
+
+# The RESIDENT sprint orchestrator: stays awake listening; one sprint
+# resume pass per event (each awaiting gate gets exactly one look).
+# RELEASE_URL=http://127.0.0.1:8788/apps/release/trigger/pubsub delegates
+# release to the resident release service (its log owns release narration).
+orchestrate-service:
+	$(require_project)
+	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT) --release-url "$(RELEASE_URL)"
 
 deploy-baseline:
 	$(require_project)
@@ -107,4 +123,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate release deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate orchestrate-service release release-service deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test

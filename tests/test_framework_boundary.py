@@ -31,10 +31,13 @@ def _imports(py_file: Path) -> set[str]:
 
 # The composition roots are the entry points allowed to choose a framework
 # (they instantiate the adapters and inject them into the core): the sprint
-# orchestrator and the standalone release loop.
+# orchestrator, the one-pass release entry, and the resident release
+# service (ADK api server hosting the release Workflow).
 COMPOSITION_ROOTS = {
     ROOT / "orchestrator" / "__main__.py",
     ROOT / "orchestrator" / "release.py",
+    ROOT / "orchestrator" / "release_service.py",
+    ROOT / "orchestrator" / "sprint_service.py",
 }
 
 

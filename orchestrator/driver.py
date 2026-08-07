@@ -368,8 +368,19 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
 
     ctx.board.begin(item["id"], "preprod_ci",
                     f"PR #{pr} build + tagged revision + smoke")
-    ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir), verified.areas,
-                                ctx.project)
+    try:
+        ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir),
+                                    verified.areas, ctx.project)
+    except deploy.DeployError as exc:
+        # Degrade, don't die: an infrastructure failure (build error,
+        # missing baseline service, quota) fails THIS item's preprod —
+        # audited with the redacted command — and the sprint walks on.
+        await ctx.audit("preprod_ci", "preprod_result", {
+            "pr": pr, "passed": False, "revision": f"pr-{pr}",
+            "error": str(exc)[:300]})
+        print(f"[ci] PR #{pr} preprod FAILED (infrastructure): "
+              f"{str(exc)[:120]}", flush=True)
+        return False
     ctx.repo_host.post_comment(pr, (
         preprod_ci.format_comment(ci) + "\n\n"
         + _marker("ci", sha, "passed" if ci.passed else "failed")))
@@ -446,6 +457,24 @@ async def run_release_pass(ctx: RunContext) -> None:
         await ctx.release_executor.run_pass(ctx)
 
 
+async def trigger_release(ctx: RunContext) -> None:
+    """Queued items get a release decision — but by WHOM depends on the
+    deployment shape. With RELEASE_TRIGGER_URL set (the resident release
+    service is running), the sprint side DELEGATES: it fires one event at
+    the release service, whose log then owns the entire release
+    narration — the sprint's job ends at status=queued (Workstream B's
+    full separation). Without it (one-shot `make orchestrate`, no service
+    running), the pass runs in-process as before."""
+    url = os.environ.get("RELEASE_TRIGGER_URL")
+    if not url:
+        await run_release_pass(ctx)
+        return
+    from orchestrator.heartbeat import post_event
+    print(f"[release] delegating to the release service ({url})",
+          flush=True)
+    await post_event(url, "sprint-delegate")
+
+
 async def decide_release_pr(ctx: RunContext, item: dict,
                             confidence: float) -> str:
     """Decide and act on ONE queued PR: re-verify the head (the
@@ -482,6 +511,8 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
     # deterministic and idempotent; this IS the deterministic merge gate.
     pr_data = ctx.repo_host.get_pr(pr)
     head = pr_data["head_sha"]
+    print(f"[release] deciding PR #{pr} ({item['id']}) — head {head[:7]}",
+          flush=True)
     ctx.workspace.checkout_detached(pr_data["head_ref"])
     try:
         verified = await verify_once(ctx, item, pr)
@@ -519,6 +550,10 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                   f"{head[:7]}", flush=True)
             return "failed"
 
+    print(f"[release] PR #{pr} verified: area={verified.primary_area} "
+          f"risk={verified.verified_risk} "
+          f"flag={'yes' if verified.flag['covered'] else 'no'} — asking the "
+          "release manager", flush=True)
     ctx.board.begin("RELEASE", "release_manager", f"deciding PR #{pr}")
     payload = {
         "task": ("Decide merge or hold for THIS ONE PR, right now. "
@@ -569,18 +604,41 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             print(f"[release] BLOCKED PR #{pr}: not mergeable "
                   f"({str(exc)[:80]})", flush=True)
             return "held"
-        deploy.promote(f"pr-{pr}")
+        try:
+            deploy.promote(f"pr-{pr}")
+        except deploy.DeployError as exc:
+            # The MERGE already landed; only the traffic shift failed.
+            # That is a half-released state no rerun can safely finish
+            # (the branch is merged; re-verifying it is meaningless) —
+            # a human completes the promote. Escalate with the facts,
+            # never crash the pass.
+            await ctx.audit("release_guard", "escalate_to_human", {
+                "pr": pr, "item": item["id"],
+                "rule": "PR merged but the traffic shift failed — promote "
+                        f"tag pr-{pr} manually (adapters.deploy promote) "
+                        "and set the item released",
+                "error": str(exc)[:300]})
+            await ctx.set_status(item["id"], "escalated", pr)
+            print(f"[release] MERGED PR #{pr} but promote FAILED — "
+                  "escalated for a manual traffic shift", flush=True)
+            return "escalated"
         await ctx.store.call("record_deploy", pr=pr,
                              revision=f"pr-{pr}", traffic="100",
                              area=verified.primary_area)
         await ctx.audit("release_manager", "merge_pr", factors)
         await ctx.set_status(item["id"], "released", pr)
-        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})", flush=True)
+        rule = decision.factors.get("dominating_rule", "")
+        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})"
+              + (f" — rule: {rule}" if rule else "")
+              + f" — {decision.reasoning[:140]}", flush=True)
         return "merged"
     # Held: the item STAYS queued in the store and is reconsidered on the
     # next release EVENT (incident cleared, confidence window passed).
     await ctx.audit("release_manager", "hold_merge", factors)
-    print(f"[release] HELD PR #{pr}: {decision.reasoning}", flush=True)
+    rule = decision.factors.get("dominating_rule", "")
+    print(f"[release] HELD PR #{pr}"
+          + (f" — rule: {rule}" if rule else "")
+          + f" — {decision.reasoning[:140]}", flush=True)
     return "held"
 
 
@@ -719,7 +777,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         # and decides — nothing to set up here beyond triggering it (the
         # gate is NOT asked twice for the same commit).
         ctx.board.finish(item["id"], "requeued for release")
-        await run_release_pass(ctx)
+        await trigger_release(ctx)
         return None
 
     # The per-item pipeline runs on ADK's engine (ADR-0007, Workstream A):
@@ -735,11 +793,12 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         # Trickle release: an approval immediately gets a release decision —
         # the pass covers the WHOLE unmerged queue, so earlier holds are
         # reconsidered under the current situation too.
-        await run_release_pass(ctx)
+        await trigger_release(ctx)
     return None
 
 
-async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
+async def run_pipeline(ctx: RunContext, parallel: int = 1,
+                       deprovision: bool = True) -> None:
     # Stale-incident hygiene: if a previous run left an incident open
     # and the service has since recovered, close it now (the resolver
     # also runs before every release pass).
@@ -802,13 +861,17 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     # later release EVENT (Scheduler tick / webhook → run_release_pass, or
     # `make release`) reconsiders it. Release does not depend on this
     # process staying alive (Workstream B).
-    await run_release_pass(ctx)
+    await trigger_release(ctx)
 
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps
     # them so resume is instant. GitHub holds the truth either way.
-    from orchestrator import provisioning
-    provisioning.deprovision(ctx.project.name)
+    # The resident sprint service passes deprovision=False: it runs many
+    # passes per process, and re-cloning per event would waste the warm
+    # checkout (provision() heals it if anything is ever broken).
+    if deprovision:
+        from orchestrator import provisioning
+        provisioning.deprovision(ctx.project.name)
 
 
 # The explicit binding: definition step name -> handler.
