@@ -580,7 +580,24 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             print(f"[release] BLOCKED PR #{pr}: not mergeable "
                   f"({str(exc)[:80]})", flush=True)
             return "held"
-        deploy.promote(f"pr-{pr}")
+        try:
+            deploy.promote(f"pr-{pr}")
+        except deploy.DeployError as exc:
+            # The MERGE already landed; only the traffic shift failed.
+            # That is a half-released state no rerun can safely finish
+            # (the branch is merged; re-verifying it is meaningless) —
+            # a human completes the promote. Escalate with the facts,
+            # never crash the pass.
+            await ctx.audit("release_guard", "escalate_to_human", {
+                "pr": pr, "item": item["id"],
+                "rule": "PR merged but the traffic shift failed — promote "
+                        f"tag pr-{pr} manually (adapters.deploy promote) "
+                        "and set the item released",
+                "error": str(exc)[:300]})
+            await ctx.set_status(item["id"], "escalated", pr)
+            print(f"[release] MERGED PR #{pr} but promote FAILED — "
+                  "escalated for a manual traffic shift", flush=True)
+            return "escalated"
         await ctx.store.call("record_deploy", pr=pr,
                              revision=f"pr-{pr}", traffic="100",
                              area=verified.primary_area)
