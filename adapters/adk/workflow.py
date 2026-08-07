@@ -1,22 +1,26 @@
-"""ADK 2.0 Workflow expression of the per-item SDLC graph.
+"""The per-item SDLC as an executing ADK 2 `Workflow` (ADR-0007).
 
-The same pipeline two ways, one implementation of each step:
-orchestrator/definition.py is the framework-neutral truth, the
-sequential driver is the guaranteed execution path, and THIS module
-renders the per-item flow as a native ADK `Workflow` — the definition's
-bounded back-edges become routed cycle edges, so `adk web` can display
-the governance graph and step through it. Every node delegates to the
-SAME single-shot functions the driver uses (review_once, verify_once,
-run_coder, ...); nothing is reimplemented.
+This is no longer a display-only shadow of an imperative driver: it IS
+the per-item execution path. `orchestrator/definition.py` remains the
+framework-neutral truth (what the pipeline is); this module renders that
+truth as a native ADK graph whose nodes delegate to the SAME single-shot
+handlers the engine owns (run_coder, review_once, verify_once, ...), and
+`adapters/adk/executor.py` runs it on ADK's engine. The definition's
+bounded back-edges become routed cycle edges (ADK rejects unconditional
+cycles); `adk web` can display and step the same graph the runner runs.
 
-The human gate is a NATIVE ADK SUSPEND (`RequestInput`) with one twist
-that keeps the identity model intact: the chat resume carries NO
-authority. The decision lives only in the allowlisted GitHub PR comment
-(ADR-0005); resuming the suspended workflow merely triggers ONE
-check_decision() look at the PR. No valid command there → the node
-suspends again (fresh interrupt_id per try). So ADK's HITL provides the
-waiting mechanics, GitHub provides the authenticated decision, and
-neither impersonates the other.
+The human gate is a native ADK SUSPEND (`RequestInput`) with the twist
+that keeps the identity model intact (ADR-0005): the resume carries NO
+authority. The decision lives only in the allowlisted GitHub PR comment;
+resuming merely triggers ONE `check_decision()` look. No valid command
+there → the node suspends again (fresh interrupt_id per try). ADK
+supplies the waiting mechanics; GitHub supplies the authenticated
+decision; neither impersonates the other.
+
+Governance boundary (G3): lifecycle status lives in the STORE and is set
+at each transition here; terminal nodes return a small JSON outcome the
+executor maps back to the driver, which owns the release pass. ADK owns
+execution-cursor state only.
 """
 
 from google.adk.events.event import Event
@@ -24,13 +28,11 @@ from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
 from orchestrator import driver
-from orchestrator.definition import SDLC
 from orchestrator.gate import check_decision
 
-# Name-level edge table (source, target, route|None). Kept as plain
-# data so tests can assert parity with orchestrator/definition.py
-# without constructing ADK objects. Cycle edges carry routes (ADK
-# rejects unconditional cycles) and realize the definition's back-edges:
+# Name-level edge table (source, target, route|None). Cycle edges carry
+# routes (ADK rejects unconditional cycles) and realize the definition's
+# back-edges:
 #   code_reviewer -> coder_fix -> code_reviewer   (changes_requested)
 #   verify -> coder_flag_fix -> verify            (policy_flag_required)
 EDGE_TABLE: list[tuple[str, str, str | None]] = [
@@ -40,7 +42,8 @@ EDGE_TABLE: list[tuple[str, str, str | None]] = [
     ("code_reviewer", "coder_fix", "changes_requested"),
     ("code_reviewer", "rejected", "out_of_scope"),
     ("code_reviewer", "escalated", "escalate"),
-    ("coder_fix", "code_reviewer", None),
+    ("coder_fix", "code_reviewer", "fixed"),
+    ("coder_fix", "escalated", "impasse"),
     ("verify", "preprod_ci", "labeled"),
     ("verify", "coder_flag_fix", "policy_flag_required"),
     ("verify", "escalated", "escalate"),
@@ -52,79 +55,174 @@ EDGE_TABLE: list[tuple[str, str, str | None]] = [
     ("approval_gate", "rejected", "reject"),
 ]
 
-BACK_EDGE_NODES = {"code_reviewer": "coder_fix", "verify": "coder_flag_fix"}
+# The four terminal nodes; their JSON `outcome` is the executor's result.
+TERMINALS = ("queued", "rejected", "failed", "escalated")
 
 
-def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
+def build_item_workflow(ctx, item: dict, branch: str,
+                        existing_pr: int | None = None) -> Workflow:
     """One backlog item's journey as an ADK Workflow.
 
-    State (PR number, iteration counters) lives in a closure because it
-    is per-run scaffolding; durable truth stays in GitHub and the store
-    exactly as in the driver.
+    `existing_pr` makes the coder node idempotent on resume: a run that
+    already opened a PR skips re-implementation and continues the graph
+    (every downstream node is itself SHA-idempotent, G5). Per-run
+    scaffolding (PR number, iteration counters) lives in a closure;
+    durable truth stays in GitHub and the store exactly as before.
     """
     flow = ctx.project.policy("orchestrator")
-    state: dict = {"pr": None, "review_rounds": 0, "flag_fixes": 0,
+    state: dict = {"pr": existing_pr, "review_rounds": 0, "flag_fixes": 0,
                    "verified": None, "gate_baseline": 0, "gate_tries": 0,
                    "gate_ignores": set()}
 
+    def _terminal(kind: str) -> dict:
+        ctx.board.finish(item["id"], {
+            "queued": "queued for release", "rejected": "rejected",
+            "failed": "failed preprod",
+            "escalated": "escalated to a human"}[kind])
+        return {"outcome": kind, "pr": state["pr"]}
+
     async def coder(node_input):
-        await driver.run_coder(ctx, item, branch)
-        state["pr"] = await driver.open_pr(ctx, item, branch)
+        if state["pr"] is None:                      # fresh item
+            await driver.run_coder(ctx, item, branch)
+            state["pr"] = await driver.open_pr(ctx, item, branch)
+            await ctx.set_status(item["id"], "in_review", state["pr"])
         return Event(output=state["pr"])
 
+    max_reviews = int(flow["max_fix_iterations"])
+    max_flag_fixes = int(flow["max_flag_fix_iterations"])
+    _UNPARSEABLE_FIX = ("Your change does not parse: {detail}. Fix the syntax "
+                        "error so every file compiles and the tests run.")
+
     async def code_reviewer(node_input):
-        verdict = await driver.review_once(ctx, item, state["pr"],
-                                           state["review_rounds"])
+        from orchestrator.dependency_graph import UnparseableSource
+        from orchestrator.rejection import Rejection, reject
+        # Resume idempotency: this head may already carry an approval (G5).
+        if driver.review_already_approved(ctx, state["pr"]):
+            return Event(output="already approved", route="approved")
+        try:
+            verdict = await driver.review_once(ctx, item, state["pr"],
+                                               state["review_rounds"])
+        except UnparseableSource as broken:
+            # Agent-written code that does not parse is coder rework, not
+            # an engine crash (code_unparseable) — one bounded round.
+            if state["review_rounds"] >= max_reviews:
+                await driver.escalate_item(
+                    ctx, item, state["pr"], "code_reviewer",
+                    f"no approval after {max_reviews} fix iterations")
+                return Event(output="unparseable, budget exhausted",
+                             route="escalate")
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(state["pr"], "code_unparseable", "coder",
+                                   f"the code does not parse: {broken}"),
+                         actor="code_reviewer")
+            state["review_rounds"] += 1
+            return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
+                         route="changes_requested")
+
         if verdict.verdict == "approve":
+            await ctx.audit("code_reviewer", "approve_review",
+                            {"pr": state["pr"],
+                             "iterations": state["review_rounds"] + 1})
             return Event(output=verdict.reasoning, route="approved")
         if verdict.verdict == "out_of_scope":
-            from orchestrator.rejection import Rejection, reject
             await reject(ctx.store, ctx.repo_host,
                          Rejection(state["pr"], "out_of_scope", "author",
                                    verdict.reasoning),
                          actor="code_reviewer")
+            await ctx.set_status(item["id"], "rejected", state["pr"])
             return Event(output=verdict.reasoning, route="out_of_scope")
-        if state["review_rounds"] >= int(flow["max_fix_iterations"]):
+        if state["review_rounds"] >= max_reviews:
+            await driver.escalate_item(
+                ctx, item, state["pr"], "code_reviewer",
+                f"no approval after {max_reviews} fix iterations")
             return Event(output="fix budget exhausted", route="escalate")
         state["review_rounds"] += 1
         return Event(output=verdict.model_dump_json(),
                      route="changes_requested")
 
     async def coder_fix(node_input):
-        await driver.run_coder(ctx, item, branch, feedback=str(node_input))
-        return Event(output="fixed")
+        changed, reply = await driver.run_coder(ctx, item, branch,
+                                                feedback=str(node_input))
+        if not changed:
+            # Impasse: reviewer demanded changes, coder declined. Put the
+            # disagreement ON THE ARTIFACT and hand it to a human —
+            # re-reviewing an identical diff resolves nothing.
+            ctx.repo_host.post_comment(state["pr"], (
+                "**🤖 AI coder — response to review (no code changes "
+                f"made)**\n\n{reply or '(no reasoning returned)'}"))
+            await driver.escalate_item(
+                ctx, item, state["pr"], "code_reviewer",
+                "coder declined the requested changes (no-change fix round)")
+            return Event(output="impasse", route="impasse")
+        return Event(output="fixed", route="fixed")
 
     async def verify(node_input):
-        result = await driver.verify_once(ctx, item, state["pr"])
+        from orchestrator.dependency_graph import UnparseableSource
+        from orchestrator.rejection import Rejection, reject
+        try:
+            result = await driver.verify_once(ctx, item, state["pr"])
+        except UnparseableSource as broken:
+            # Measurement is impossible until the code parses; same
+            # bounded rework loop as a missing flag.
+            if state["flag_fixes"] >= max_flag_fixes:
+                await driver.escalate_item(
+                    ctx, item, state["pr"], "verify",
+                    f"code still unparseable after {max_flag_fixes} fix")
+                return Event(output="unparseable, budget exhausted",
+                             route="escalate")
+            await reject(ctx.store, ctx.repo_host,
+                         Rejection(state["pr"], "code_unparseable", "coder",
+                                   f"the code does not parse: {broken}"),
+                         actor="verify")
+            state["flag_fixes"] += 1
+            return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
+                         route="policy_flag_required")
+
         state["verified"] = result
         if not result.needs_flag:
+            await ctx.set_status(item["id"], "verified", state["pr"])
             return Event(output=result.title_prefix, route="labeled")
-        if state["flag_fixes"] >= int(flow["max_flag_fix_iterations"]):
+        if state["flag_fixes"] >= max_flag_fixes:
+            await driver.escalate_item(
+                ctx, item, state["pr"], "verify",
+                f"flag still missing after {max_flag_fixes} fix")
             return Event(output="flag budget exhausted", route="escalate")
         state["flag_fixes"] += 1
-        from orchestrator.rejection import Rejection, reject
         await reject(ctx.store, ctx.repo_host,
                      Rejection(state["pr"], "policy_flag_required", "coder",
                                f"verified risk {result.verified_risk} "
-                               "requires a feature flag"),
+                               "requires a feature flag; none gates the new "
+                               "behavior"),
                      actor="verify")
-        return Event(output=result.verified_risk,
-                     route="policy_flag_required")
+        return Event(output=(
+            "Policy violation: this change's verified risk requires the NEW "
+            "behavior to be gated behind a feature flag (default off) in "
+            "flags.json. Wrap it and keep tests covering both flag states."),
+            route="policy_flag_required")
 
     async def coder_flag_fix(node_input):
-        await driver.run_coder(ctx, item, branch, feedback=(
-            "Policy violation: wrap the NEW behavior behind a feature flag "
-            "(default off) in flags.json; test both flag states."))
+        # node_input is the fix instruction verify chose (flag policy OR
+        # a syntax error) — one fix path serves both, returning to verify.
+        await driver.run_coder(ctx, item, branch, feedback=str(node_input))
         return Event(output="flagged")
 
     async def preprod_ci(node_input):
-        ok = await driver.run_preprod_ci(ctx, item, state["pr"],
-                                         state["verified"])
-        return Event(output=ok, route="passed" if ok else "failed")
+        # Concurrent preprod deploys against ONE Cloud Run service fight
+        # over revision creation; serialize them even when coders run in
+        # parallel (same guard the sequential driver held).
+        async with ctx.ci_lock:
+            ok = await driver.run_preprod_ci(ctx, item, state["pr"],
+                                             state["verified"])
+        if ok:
+            await ctx.set_status(item["id"], "preprod_passed", state["pr"])
+            return Event(output=ok, route="passed")
+        await ctx.set_status(item["id"], "failed", state["pr"])
+        return Event(output=ok, route="failed")
 
     async def approver(node_input):
         state["gate_baseline"] = await driver.run_approver(
             ctx, item, state["pr"], state["verified"])
+        await ctx.set_status(item["id"], "awaiting_approval", state["pr"])
         return Event(output="dossier posted")
 
     async def approval_gate(node_input):
@@ -144,9 +242,10 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
                          Rejection(state["pr"], "human_declined", "backlog",
                                    decision.reason or "no reason given"),
                          actor="approval_gate")
+            await ctx.set_status(item["id"], "rejected", state["pr"])
             yield Event(output=False, route="reject")
             return
-        if decision:  # hold: advance past it, keep waiting
+        if decision:  # hold: advance the baseline past it, keep waiting
             state["gate_baseline"] = decision.comment_index + 1
 
         state["gate_tries"] += 1
@@ -158,20 +257,21 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
                      "/reject <reason>, or /hold on the PR. Decide there, "
                      "then reply here (anything) to re-check."))
 
-    def queued(node_input):
-        driver_entry = driver.ApprovedPR(pr=state["pr"], item=item,
-                                         verified=state["verified"])
-        ctx.approved.append(driver_entry)
-        return f"PR #{state['pr']} queued for release"
+    async def queued(node_input):
+        await ctx.set_status(item["id"], "queued", state["pr"])
+        ctx.approved.append(driver.ApprovedPR(
+            pr=state["pr"], item=item, verified=state["verified"]))
+        # The driver runs the release pass after the executor returns.
+        return _terminal("queued")
 
     def rejected(node_input):
-        return f"PR #{state['pr']} rejected"
+        return _terminal("rejected")
 
     def failed(node_input):
-        return f"PR #{state['pr']} failed preprod"
+        return _terminal("failed")
 
     def escalated(node_input):
-        return f"PR #{state['pr']} escalated to a human"
+        return _terminal("escalated")
 
     nodes = {"coder": coder, "code_reviewer": code_reviewer,
              "coder_fix": coder_fix, "verify": verify,
@@ -204,21 +304,3 @@ def build_item_workflow(ctx, item: dict, branch: str) -> Workflow:
             edges.append((src_node, target))
 
     return Workflow(name=f"item_{item['id'].replace('-', '_')}", edges=edges)
-
-
-def definition_parity() -> dict:
-    """Structural parity facts for tests: the Workflow covers every
-    per-item definition step and realizes every declared back-edge as
-    a routed cycle."""
-    names = {src for src, _, _ in EDGE_TABLE if src != "START"} \
-        | {dst for _, dst, _ in EDGE_TABLE}
-    cycles = {
-        step.name: (step.name, BACK_EDGE_NODES.get(step.name))
-        for step in SDLC.per_item if step.back_edge
-    }
-    realized = {
-        step: fix in names
-        and (fix, step, None) in [(s, d, r) for s, d, r in EDGE_TABLE]
-        for step, (_, fix) in cycles.items()
-    }
-    return {"node_names": names, "back_edges_realized": realized}

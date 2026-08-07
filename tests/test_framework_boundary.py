@@ -45,17 +45,34 @@ def test_core_never_imports_a_framework():
                     "framework code belongs in adapters/adk/ (ADR-0007)")
 
 
-def test_workflow_expression_matches_definition():
-    from adapters.adk.workflow import definition_parity
+def test_workflow_covers_every_definition_step():
+    """The executing ADK Workflow must have a node for every per-item
+    definition step — the graph IS the per-item execution path now, so a
+    definition step with no node would silently never run. (End-to-end
+    execution of that graph is exercised in test_item_workflow.py.)"""
+    from adapters.adk.workflow import EDGE_TABLE
 
-    parity = definition_parity()
+    node_names = {src for src, _, _ in EDGE_TABLE if src != "START"} \
+        | {dst for _, dst, _ in EDGE_TABLE}
     per_item_names = {step.name for step in SDLC.per_item}
-    assert per_item_names <= parity["node_names"], (
+    assert per_item_names <= node_names, (
         "the ADK Workflow must cover every per-item definition step")
-    # Every declared back-edge is realized as a routed cycle.
-    backedged = {s.name for s in SDLC.per_item if s.back_edge}
-    assert set(parity["back_edges_realized"]) == backedged
-    assert all(parity["back_edges_realized"].values())
+    # Every definition back-edge is realized as a routed cycle in the graph
+    # (a fix step that returns to the step that requested the fix).
+    for step in SDLC.per_item:
+        if step.back_edge:
+            fixers = {src for src, dst, _ in EDGE_TABLE if dst == step.name
+                      and src != _step_before(step.name)}
+            assert fixers, f"{step.name} declares a back-edge but no cycle "\
+                           "returns to it"
+
+
+def _step_before(name: str) -> str | None:
+    from adapters.adk.workflow import EDGE_TABLE
+    for src, dst, _ in EDGE_TABLE:
+        if dst == name:
+            return src
+    return None
 
 
 def test_workflow_constructs_and_validates():

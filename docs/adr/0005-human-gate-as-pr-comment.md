@@ -36,7 +36,8 @@ The decision's authority never moves — it is always the allowlisted
 GitHub comment. What became configurable is WHEN the orchestrator looks
 for it (`gate_mode` in the approver step policy):
 
-- **poll** (default): check the PR every few seconds (`await_decision`).
+- **poll** (default): the executor resumes the gate node on a bounded
+  budget, each resume doing one `check_decision` look at the PR.
 - **nudge**: block until the operator presses Enter, then check exactly
   once (`check_decision`). No busy polling.
 - In the ADK Workflow expression the gate is a NATIVE `RequestInput`

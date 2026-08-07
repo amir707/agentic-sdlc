@@ -27,6 +27,7 @@ def main() -> None:
     load_dotenv(ROOT / "projects-config" / args.project / ".env")
 
     from adapters.adk.invoker import ADKInvoker
+    from adapters.adk.executor import ADKPipelineExecutor
     from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_pipeline
 
@@ -38,7 +39,8 @@ def main() -> None:
           f"gemini-default={os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}",
           flush=True)
     project = load_project(args.project)
-    ctx = build_context(project, invoker=ADKInvoker())
+    ctx = build_context(project, invoker=ADKInvoker(),
+                        executor=ADKPipelineExecutor())
     try:
         asyncio.run(run_pipeline(ctx, parallel=args.parallel))
     except KeyboardInterrupt:
