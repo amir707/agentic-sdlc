@@ -391,3 +391,34 @@ deploy --source` rebuilds the service and recreates the registry repo
 and bucket. Leave the deploy service account and the project itself in
 place unless you are done with the project entirely. Step 1 alone is
 enough to stop the bleed while keeping the service redeployable.
+
+## 14. Delivery dashboard (local + Vercel)
+
+A read-only web dashboard over the store's new `/state` JSON route:
+kanban sprint board (click a ticket for its audit history), preprod/prod
+environment cards (click for deploy history), token usage, incidents.
+The monitor bearer token stays SERVER-side in a tiny proxy — the browser
+never sees it. The same static assets serve both deployments.
+
+```bash
+# local (against this project's store; store must be running):
+make dashboard PROJECT=candidate-app-2     # http://127.0.0.1:8790
+```
+
+Vercel deployment (points at the CLOUD delivery store — a Vercel
+function cannot reach your laptop):
+
+```bash
+npm i -g vercel && vercel login
+cd agentic-sdlc/dashboard
+vercel link                                # create/link the project
+vercel env add DELIVERY_STORE_URL production   # https://delivery-store-….run.app/mcp
+vercel env add MCP_TOKEN_MONITOR production    # the store's monitor token
+vercel env add GITHUB_REPO production          # e.g. amir707/candidate-app-2 (PR links)
+vercel --prod
+```
+
+The dashboard polls `/api/state` every 5s; `dashboard/api/state.js` is
+the Vercel proxy and `scripts/dashboard_server.py` the identical local
+one. One dashboard shows one project's world (one store per project);
+deploy a second Vercel project with different env values for another.

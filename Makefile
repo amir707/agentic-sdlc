@@ -112,6 +112,12 @@ try-setup:
 	    echo "kept — continue: python3 scripts/setup.py --project $(NAME)"; \
 	  else rm -rf projects-config/$(NAME) && echo "deleted (preview only)"; fi
 
+# Delivery dashboard: kanban sprint board + environments + token usage,
+# served locally against this project's store (Vercel deploy: runbook).
+dashboard:
+	$(require_project)
+	$(PYTHON) scripts/dashboard_server.py --project $(PROJECT)
+
 verify-demo:
 	$(require_project)
 	$(PYTHON) scripts/verify_demo.py
@@ -123,4 +129,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate orchestrate-service release release-service deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate orchestrate-service release release-service deploy-baseline reset-demo reset-item demo status watch try-setup dashboard verify-demo adk-web test

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic SDLC — delivery dashboard</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛰️</text></svg>">
+</head>
+<body>
+<div class="viz-root">
+  <header class="topbar">
+    <div>
+      <h1>Agentic SDLC</h1>
+      <div class="sub"><span id="project-name">…</span> · governed delivery</div>
+    </div>
+    <div class="live">
+      <span id="live-dot" class="dot"></span>
+      <span id="live-text">connecting…</span>
+    </div>
+  </header>
+
+  <div id="error-banner" class="banner hidden"></div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Sprint board</h2>
+      <div class="panel-note" id="sprint-note"></div>
+    </div>
+    <div id="board" class="board" aria-label="sprint kanban board"></div>
+    <div id="unpacked" class="unpacked"></div>
+  </section>
+
+  <div class="row">
+    <section class="panel half">
+      <div class="panel-head">
+        <h2>Environments</h2>
+        <div class="panel-note">click an environment for its deploy history</div>
+      </div>
+      <div id="envs" class="envs"></div>
+      <div class="panel-head" style="margin-top:14px">
+        <h2>Incidents</h2>
+      </div>
+      <div id="incidents" class="incidents"></div>
+    </section>
+
+    <section class="panel half">
+      <div class="panel-head">
+        <h2>Token usage</h2>
+        <div class="seg" role="tablist">
+          <button id="tok-sprint" class="seg-btn active" role="tab">this sprint</button>
+          <button id="tok-all" class="seg-btn" role="tab">all-time</button>
+          <button id="tok-table" class="seg-btn" role="tab" title="table view">▤</button>
+        </div>
+      </div>
+      <div id="tokens" class="tokens"></div>
+      <div class="legend" id="tok-legend">
+        <span class="key"><span class="swatch s1"></span>input tokens</span>
+        <span class="key"><span class="swatch s2"></span>output tokens</span>
+      </div>
+    </section>
+  </div>
+
+  <footer class="foot">
+    read-only view over the delivery store · refreshed every 5s ·
+    <span id="generated-at"></span>
+  </footer>
+
+  <aside id="drawer" class="drawer hidden" aria-modal="true">
+    <div class="drawer-head">
+      <h3 id="drawer-title"></h3>
+      <button id="drawer-close" aria-label="close">✕</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+  <div id="scrim" class="scrim hidden"></div>
+  <div id="tooltip" class="tooltip hidden"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

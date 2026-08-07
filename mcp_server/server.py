@@ -254,6 +254,32 @@ async def status_report(request):
     return PlainTextResponse(report())
 
 
+@mcp.custom_route("/state", methods=["GET"])
+async def state_json(request):
+    """The whole world as JSON, for the dashboard (read-only; bearer
+    token enforced by the middleware like every route). Not an MCP tool
+    — the store's tool surface is unchanged (design invariant: security
+    properties live in the TOOLS; this is the same data /status renders,
+    machine-readable)."""
+    from datetime import datetime, timezone
+
+    with db.connect() as conn:
+        sprint = db.current_sprint(conn)
+        return JSONResponse({
+            "project": os.environ.get("PROJECT", ""),
+            "generated_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"),
+            "sprint": sprint,
+            "items": db.list_backlog(conn),
+            "audit": db.list_audit(conn)[-400:],
+            "deploys": db.list_deploys(conn),
+            "incidents": db.list_incidents(conn),
+            "token_usage_sprint": db.summarize_token_usage(
+                conn, sprint["id"] if sprint else None),
+            "token_usage_all": db.summarize_token_usage(conn),
+        })
+
+
 # --- auth middleware ---------------------------------------------------------
 
 class BearerRoleMiddleware:
