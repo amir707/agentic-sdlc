@@ -39,6 +39,21 @@ async def _beat_forever(url: str, minutes: float, name: str) -> None:
                   "next interval retries", flush=True)
 
 
+async def post_event(url: str, name: str) -> None:
+    """Deliver ONE Pub/Sub-shaped event to a trigger endpoint (the local
+    stand-in for a store/webhook publish). Awaits the receiver's pass so
+    the caller's process never exits with the event half-delivered; a
+    failure is only a missed nudge — the receiver's own heartbeat
+    retries the state soon after."""
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            await client.post(url, json=_payload(name, 1))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[event] {name}: delivery to {url} failed "
+              f"({type(exc).__name__}: {str(exc)[:80]}) — the receiver's "
+              "heartbeat will pick the state up", flush=True)
+
+
 async def _serve(app, host: str, port: int, url: str, minutes: float,
                  name: str) -> None:
     import uvicorn

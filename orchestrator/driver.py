@@ -457,6 +457,24 @@ async def run_release_pass(ctx: RunContext) -> None:
         await ctx.release_executor.run_pass(ctx)
 
 
+async def trigger_release(ctx: RunContext) -> None:
+    """Queued items get a release decision — but by WHOM depends on the
+    deployment shape. With RELEASE_TRIGGER_URL set (the resident release
+    service is running), the sprint side DELEGATES: it fires one event at
+    the release service, whose log then owns the entire release
+    narration — the sprint's job ends at status=queued (Workstream B's
+    full separation). Without it (one-shot `make orchestrate`, no service
+    running), the pass runs in-process as before."""
+    url = os.environ.get("RELEASE_TRIGGER_URL")
+    if not url:
+        await run_release_pass(ctx)
+        return
+    from orchestrator.heartbeat import post_event
+    print(f"[release] delegating to the release service ({url})",
+          flush=True)
+    await post_event(url, "sprint-delegate")
+
+
 async def decide_release_pr(ctx: RunContext, item: dict,
                             confidence: float) -> str:
     """Decide and act on ONE queued PR: re-verify the head (the
@@ -759,7 +777,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         # and decides — nothing to set up here beyond triggering it (the
         # gate is NOT asked twice for the same commit).
         ctx.board.finish(item["id"], "requeued for release")
-        await run_release_pass(ctx)
+        await trigger_release(ctx)
         return None
 
     # The per-item pipeline runs on ADK's engine (ADR-0007, Workstream A):
@@ -775,7 +793,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         # Trickle release: an approval immediately gets a release decision —
         # the pass covers the WHOLE unmerged queue, so earlier holds are
         # reconsidered under the current situation too.
-        await run_release_pass(ctx)
+        await trigger_release(ctx)
     return None
 
 
@@ -843,7 +861,7 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
     # later release EVENT (Scheduler tick / webhook → run_release_pass, or
     # `make release`) reconsiders it. Release does not depend on this
     # process staying alive (Workstream B).
-    await run_release_pass(ctx)
+    await trigger_release(ctx)
 
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps
