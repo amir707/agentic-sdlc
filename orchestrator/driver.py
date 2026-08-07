@@ -493,6 +493,8 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
     # deterministic and idempotent; this IS the deterministic merge gate.
     pr_data = ctx.repo_host.get_pr(pr)
     head = pr_data["head_sha"]
+    print(f"[release] deciding PR #{pr} ({item['id']}) — head {head[:7]}",
+          flush=True)
     ctx.workspace.checkout_detached(pr_data["head_ref"])
     try:
         verified = await verify_once(ctx, item, pr)
@@ -530,6 +532,10 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                   f"{head[:7]}", flush=True)
             return "failed"
 
+    print(f"[release] PR #{pr} verified: area={verified.primary_area} "
+          f"risk={verified.verified_risk} "
+          f"flag={'yes' if verified.flag['covered'] else 'no'} — asking the "
+          "release manager", flush=True)
     ctx.board.begin("RELEASE", "release_manager", f"deciding PR #{pr}")
     payload = {
         "task": ("Decide merge or hold for THIS ONE PR, right now. "
@@ -603,12 +609,18 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                              area=verified.primary_area)
         await ctx.audit("release_manager", "merge_pr", factors)
         await ctx.set_status(item["id"], "released", pr)
-        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})", flush=True)
+        rule = decision.factors.get("dominating_rule", "")
+        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})"
+              + (f" — rule: {rule}" if rule else "")
+              + f" — {decision.reasoning[:140]}", flush=True)
         return "merged"
     # Held: the item STAYS queued in the store and is reconsidered on the
     # next release EVENT (incident cleared, confidence window passed).
     await ctx.audit("release_manager", "hold_merge", factors)
-    print(f"[release] HELD PR #{pr}: {decision.reasoning}", flush=True)
+    rule = decision.factors.get("dominating_rule", "")
+    print(f"[release] HELD PR #{pr}"
+          + (f" — rule: {rule}" if rule else "")
+          + f" — {decision.reasoning[:140]}", flush=True)
     return "held"
 
 
