@@ -4,6 +4,7 @@
 PYTHON := .venv/bin/python
 PROJECT ?= candidate-app
 PARALLEL ?= 1
+HEARTBEAT ?= 5
 
 include .env
 -include projects-config/$(PROJECT)/.env
@@ -55,13 +56,13 @@ release:
 # pass per event (Pub/Sub push in the cloud, HTTP POST locally).
 release-service:
 	$(require_project)
-	$(PYTHON) -m orchestrator.release_service --project $(PROJECT)
+	$(PYTHON) -m orchestrator.release_service --project $(PROJECT) --heartbeat-minutes $(HEARTBEAT)
 
 # The RESIDENT sprint orchestrator: stays awake listening; one sprint
 # resume pass per event (each awaiting gate gets exactly one look).
 orchestrate-service:
 	$(require_project)
-	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL)
+	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT)
 
 deploy-baseline:
 	$(require_project)
