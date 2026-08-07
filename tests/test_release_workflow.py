@@ -94,3 +94,33 @@ def test_incident_hygiene_runs_before_any_decision(stubs, monkeypatch):
     ctx = Recorder([{"id": "A", "pr": 1}])
     _run(ctx)
     assert order == ["resolver", "pr1"]  # stale incidents never hold a merge
+
+
+def test_one_workflow_instance_serves_many_events(stubs):
+    """The resident release service reuses ONE workflow instance across
+    trigger events — the walk cursor must reset every pass, or the second
+    event would resume mid-queue (or past the end)."""
+    from google.adk.apps import App, ResumabilityConfig
+    from google.adk.runners import InMemoryRunner
+    from google.genai import types
+
+    ctx = Recorder([{"id": "A", "pr": 1}, {"id": "B", "pr": 2}])
+    flow = rwf.build_release_workflow(ctx)   # built ONCE, like the service
+    app = App(name="svc", root_agent=flow,
+              resumability_config=ResumabilityConfig(is_resumable=True))
+    runner = InMemoryRunner(app=app)
+
+    async def one_event(n):
+        session = await runner.session_service.create_session(
+            app_name="svc", user_id=f"event{n}")
+        message = types.Content(role="user",
+                                parts=[types.Part.from_text(text="go")])
+        async for _ in runner.run_async(user_id=f"event{n}",
+                                        session_id=session.id,
+                                        new_message=message):
+            pass
+
+    asyncio.run(one_event(1))
+    asyncio.run(one_event(2))
+    # both events walked the FULL queue from the front
+    assert ctx.decided == [1, 2, 1, 2]
