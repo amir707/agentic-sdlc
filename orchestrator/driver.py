@@ -368,8 +368,19 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
 
     ctx.board.begin(item["id"], "preprod_ci",
                     f"PR #{pr} build + tagged revision + smoke")
-    ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir), verified.areas,
-                                ctx.project)
+    try:
+        ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir),
+                                    verified.areas, ctx.project)
+    except deploy.DeployError as exc:
+        # Degrade, don't die: an infrastructure failure (build error,
+        # missing baseline service, quota) fails THIS item's preprod —
+        # audited with the redacted command — and the sprint walks on.
+        await ctx.audit("preprod_ci", "preprod_result", {
+            "pr": pr, "passed": False, "revision": f"pr-{pr}",
+            "error": str(exc)[:300]})
+        print(f"[ci] PR #{pr} preprod FAILED (infrastructure): "
+              f"{str(exc)[:120]}", flush=True)
+        return False
     ctx.repo_host.post_comment(pr, (
         preprod_ci.format_comment(ci) + "\n\n"
         + _marker("ci", sha, "passed" if ci.passed else "failed")))
