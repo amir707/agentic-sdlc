@@ -304,18 +304,33 @@ make release PROJECT=candidate-app
 #   → python -m orchestrator.release --project <name>
 ```
 
-The event is the loop. In the cloud that event is an **ADK ambient
-trigger**: a **Cloud Scheduler** job (the confidence-window timer) and a
-**GitHub webhook** (PR approved / incident closed) publish to a Pub/Sub
-topic whose push subscription hits ADK's trigger endpoint
-`POST /apps/{app}/trigger/pubsub`, exposed by
-`get_fast_api_app(trigger_sources=["pubsub"])` — each message runs exactly
-one release pass. Build the trigger app against the ADK ambient-agent
-sample and deploy it as a Cloud Run service; locally a cron or `/loop`
-calling `make release` stands in for the scheduler. The store-sourced
-queue makes the local single pass and the event-triggered form identical
-— only the trigger changes. The sprint orchestrator then only has to
-drive items to `status=queued`.
+The event is the loop — and the RESIDENT release manager is built:
+
+```bash
+# stays awake listening; runs one release pass per incoming event
+make release-service PROJECT=candidate-app-2
+#   → python -m orchestrator.release_service --project <name>  (port 8788)
+
+# wake it manually (a Pub/Sub-shaped POST; base64 payload is arbitrary):
+curl -s -X POST localhost:8788/apps/release/trigger/pubsub \
+  -H 'Content-Type: application/json' \
+  -d '{"message": {"data": "cmVsZWFzZQ==", "messageId": "m1"},
+       "subscription": "manual"}'
+```
+
+It is an ADK api server (`get_fast_api_app(trigger_sources=["pubsub"])`)
+whose `release` app's root_agent is the release Workflow — parked on
+network I/O between events, never polling. `ADK_TRIGGER_MAX_CONCURRENT=1`
+keeps passes single-flight (one decision, one deploy at a time).
+
+Cloud wiring: deploy this service to Cloud Run, then point a Pub/Sub
+push subscription at `/apps/release/trigger/pubsub`, publishing from a
+**Cloud Scheduler** job (the confidence-window timer), the **store** on
+`set_item_status(queued)` (the new-candidate event), and the **incident
+resolver** on recovery (the held-PR-can-move event). At-least-once and
+duplicate deliveries are safe: the pass is stateless over the store, so
+a spurious wake-up costs one read and "queue empty". The sprint
+orchestrator only has to drive items to `status=queued`.
 
 ## 12. Tear down: stop the hourly bill after testing
 

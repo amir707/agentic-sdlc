@@ -61,6 +61,10 @@ def build_release_workflow(ctx) -> Workflow:
         return Event(output="incidents reconciled")
 
     async def load_queue(node_input):
+        # Reset the walk cursor HERE, not only at build time: the resident
+        # release service reuses ONE workflow instance across many trigger
+        # events, so every pass must start its walk from the front.
+        state["index"] = 0
         state["queue"] = await driver.release_queue(ctx)
         if not state["queue"]:
             ctx.board.finish("RELEASE", "queue empty")
