@@ -567,33 +567,14 @@ async def _release_pass_locked(ctx: RunContext) -> None:
     ctx.board.finish("RELEASE", "pass complete")
 
 
-async def run_release_loop(ctx: RunContext) -> None:
-    """Autonomous, bounded release loop over STORE state — the whole of
-    Workstream B's in-process form. `python -m orchestrator.release` runs
-    exactly this, so a held PR still merges on incident recovery even with
-    the sprint process long gone. "When to reconsider a held PR" is
-    answered by the world (incident recovery, confidence windows) plus
-    policy, never a terminal prompt. Bounded like every other loop; held
-    PRs stay queued when the budget runs out and any later run resumes.
-
-    (The deployed form replaces this pacing with an event trigger —
-    Cloud Scheduler / a GitHub webhook → Pub/Sub → this same pass; see
-    the runbook. The store-sourced queue is what makes both forms work.)"""
-    await run_release_pass(ctx)
-    flow = ctx.project.policy("orchestrator")
-    recheck = float(flow["release_recheck_seconds"])
-    budget = float(flow["max_release_wait_minutes"]) * 60.0
-    waited = 0.0
-    while await release_queue(ctx) and waited < budget:
-        print(f"[release] held PRs remain — next pass in {recheck:.0f}s "
-              f"(wait budget left: {(budget - waited) / 60:.0f}m)",
-              flush=True)
-        await asyncio.sleep(recheck)
-        waited += recheck
-        await run_release_pass(ctx)
-    if await release_queue(ctx):
-        print("[release] wait budget exhausted — held PRs stay queued; "
-              "a rerun reconsiders them", flush=True)
+# NO in-process recheck loop: "when to reconsider a held PR" is answered
+# by an EVENT — a Cloud Scheduler tick or a GitHub webhook (incident
+# recovery / approval) → Pub/Sub → ADK's ambient-trigger endpoint
+# (get_fast_api_app(trigger_sources=["pubsub"])), each firing exactly one
+# run_release_pass over store state. A held PR simply stays queued until
+# the next event; there is nothing to poll, so there is no asyncio.sleep.
+# `python -m orchestrator.release` (make release) is the same single pass
+# run manually; see the runbook for the trigger wiring.
 
 
 # --- the run -----------------------------------------------------------------
@@ -798,11 +779,13 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
         for item in selected:
             await process_item(ctx, item)
 
-    # Trickle passes already ran per approval; this final autonomous loop
-    # gives any remaining holds their bounded rechecks over STORE state.
-    # It is the same loop `python -m orchestrator.release` runs on its own
-    # — release no longer depends on this process (Workstream B).
-    await run_release_loop(ctx)
+    # Trickle passes already ran per approval; one final pass gives any
+    # remaining holds a look now that the sprint is complete. It is NOT a
+    # waiting loop — a PR still held here stays queued in the store, and a
+    # later release EVENT (Scheduler tick / webhook → run_release_pass, or
+    # `make release`) reconsiders it. Release does not depend on this
+    # process staying alive (Workstream B).
+    await run_release_pass(ctx)
 
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps

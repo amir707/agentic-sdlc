@@ -44,11 +44,12 @@ orchestrate:
 	$(require_project)
 	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
 
-# Release loop as its own process (Workstream B): merges queued PRs from
-# store state, independent of a sprint run. `make release ONCE=1` = one pass.
+# ONE release pass over store state (Workstream B): the event-driven unit
+# of release, independent of a sprint run. Repeated invocation is the
+# trigger's job (Cloud Scheduler / webhook in the cloud; cron/loop locally).
 release:
 	$(require_project)
-	$(PYTHON) -m orchestrator.release --project $(PROJECT) $(if $(ONCE),--once,)
+	$(PYTHON) -m orchestrator.release --project $(PROJECT)
 
 deploy-baseline:
 	$(require_project)
