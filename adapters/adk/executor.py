@@ -7,9 +7,9 @@ an `App` + `Runner` with resumability, and drives the human gate's
 
 What crosses the boundary back to the driver is a small `ItemOutcome`
 (G3): the store already carries lifecycle status (the workflow nodes set
-it at each transition) and the in-memory release queue (the `queued`
-node appends to `ctx.approved`); the driver reads the outcome to decide
-whether to run the release pass. ADK owns execution-cursor state only.
+it at each transition — `status=queued` IS the release queue); the
+driver reads the outcome to decide whether to run a release pass. ADK
+owns execution-cursor state only.
 """
 
 import asyncio

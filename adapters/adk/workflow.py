@@ -258,10 +258,11 @@ def build_item_workflow(ctx, item: dict, branch: str,
                      "then reply here (anything) to re-check."))
 
     async def queued(node_input):
+        # The store status IS the release queue (Workstream B): the
+        # release pass reads status=queued, so setting it here is all the
+        # hand-off the release loop needs. The driver runs a release pass
+        # after the executor returns.
         await ctx.set_status(item["id"], "queued", state["pr"])
-        ctx.approved.append(driver.ApprovedPR(
-            pr=state["pr"], item=item, verified=state["verified"]))
-        # The driver runs the release pass after the executor returns.
         return _terminal("queued")
 
     def rejected(node_input):

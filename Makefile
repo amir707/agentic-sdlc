@@ -44,6 +44,12 @@ orchestrate:
 	$(require_project)
 	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
 
+# Release loop as its own process (Workstream B): merges queued PRs from
+# store state, independent of a sprint run. `make release ONCE=1` = one pass.
+release:
+	$(require_project)
+	$(PYTHON) -m orchestrator.release --project $(PROJECT) $(if $(ONCE),--once,)
+
 deploy-baseline:
 	$(require_project)
 	PROJECT_CHECKOUT_DIR=$$($(PYTHON) -m orchestrator.provisioning --project $(PROJECT)) \
@@ -100,4 +106,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate release deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test
