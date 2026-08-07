@@ -5,6 +5,7 @@ PYTHON := .venv/bin/python
 PROJECT ?= candidate-app
 PARALLEL ?= 1
 HEARTBEAT ?= 5
+RELEASE_URL ?=
 
 include .env
 -include projects-config/$(PROJECT)/.env
@@ -60,9 +61,11 @@ release-service:
 
 # The RESIDENT sprint orchestrator: stays awake listening; one sprint
 # resume pass per event (each awaiting gate gets exactly one look).
+# RELEASE_URL=http://127.0.0.1:8788/apps/release/trigger/pubsub delegates
+# release to the resident release service (its log owns release narration).
 orchestrate-service:
 	$(require_project)
-	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT)
+	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT) --release-url "$(RELEASE_URL)"
 
 deploy-baseline:
 	$(require_project)

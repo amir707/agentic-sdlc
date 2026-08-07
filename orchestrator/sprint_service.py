@@ -42,6 +42,11 @@ def main() -> None:
     parser.add_argument("--heartbeat-minutes", type=float, default=5.0,
                         help="self-wake interval until Scheduler/webhook "
                              "are wired (0 disables)")
+    parser.add_argument("--release-url", default="",
+                        help="the resident release service's trigger "
+                             "endpoint; when set, the sprint DELEGATES "
+                             "release (its log owns release narration) "
+                             "instead of running the pass in-process")
     args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -53,6 +58,8 @@ def main() -> None:
     # Single-flight: two concurrent events must queue, not race two
     # passes over the same items.
     os.environ.setdefault("ADK_TRIGGER_MAX_CONCURRENT", "1")
+    if args.release_url:
+        os.environ["RELEASE_TRIGGER_URL"] = args.release_url
 
     from google.adk.cli.fast_api import get_fast_api_app
 
