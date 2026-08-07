@@ -33,11 +33,13 @@ def main() -> None:
     load_dotenv(ROOT / "projects-config" / args.project / ".env")
 
     from adapters.adk.invoker import ADKInvoker
+    from adapters.adk.release_workflow import ADKReleaseExecutor
     from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_release_pass
 
     project = load_project(args.project)
-    ctx = build_context(project, invoker=ADKInvoker())  # no executor
+    ctx = build_context(project, invoker=ADKInvoker(),
+                        release_executor=ADKReleaseExecutor())
     try:
         asyncio.run(run_release_pass(ctx))
     except KeyboardInterrupt:
