@@ -62,7 +62,7 @@ flowchart LR
 | Release manager | reasoning agent (Gemini) | weighs incidents, closures, confidence windows |
 | Synthetic monitor | deterministic prober | threshold check on a sliding window |
 | Incident resolver | deterministic tool | hysteresis rule; separate from detection by role |
-| Orchestrator | plain Python driver | sequential, inspectable (ADR-0003) |
+| Orchestrator | Python driver (planning + release) + ADK Workflow (per-item) | the per-item pipeline runs on ADK's graph engine; the driver owns planning, resume dispatch, and release (ADR-0003, ADR-0007) |
 
 ## The one MCP boundary
 
@@ -119,14 +119,21 @@ The SDLC core is framework-agnostic: `orchestrator/invoker.py` defines
 the AgentInvoker port (AgentSpec in — prompt, model name, declared tool
 needs — Invocation out), and `sdlc_steps/*/spec.py` DECLARE tools
 (plain callables, or a `StoreTools` filter) rather than constructing
-them. Exactly one package speaks ADK: `adapters/adk/` materializes
-specs into `LlmAgent`s (LiteLLM bridging, MCP toolsets, token metering
-via `after_model_callback`, `output_schema` on the tool-less approver)
-and renders the per-item pipeline as a native ADK 2 `Workflow` whose
-routed cycle edges realize the definition's back-edges. The composition
-root (`orchestrator/__main__.py`) is the only file that chooses a
-framework. `tests/test_framework_boundary.py` enforces all of this
-structurally, and structured verdicts (`orchestrator/schemas.py`)
+them. Two ports draw the boundary: `orchestrator/invoker.py`
+(AgentInvoker, agent turns) and `orchestrator/executor.py`
+(PipelineExecutor, the per-item pipeline). Exactly one package speaks
+ADK: `adapters/adk/` materializes specs into `LlmAgent`s (LiteLLM
+bridging, MCP toolsets, token metering via `after_model_callback`,
+`output_schema` on the tool-less approver) AND *executes* the per-item
+pipeline as a native ADK 2 `Workflow` (`adapters/adk/workflow.py` builds
+the graph, `adapters/adk/executor.py` runs it on an `App`/`Runner` with
+resumability) — the fix/flag loops are routed cycle edges and the human
+gate is a native `RequestInput` suspend, not hand-written control flow.
+The composition root (`orchestrator/__main__.py`) is the only file that
+chooses a framework, injecting both ports. `tests/test_framework_boundary.py`
+enforces the boundary structurally (the core imports no framework),
+`tests/test_item_workflow.py` runs the graph end-to-end on ADK's engine
+with handlers stubbed, and structured verdicts (`orchestrator/schemas.py`)
 validate every agent decision at the boundary.
 
 Dev loop: `make adk-web` (entries in `tests/debug/adk_web/`, one shared

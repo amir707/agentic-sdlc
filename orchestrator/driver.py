@@ -1,16 +1,20 @@
-"""The driver: executes the SDLC definition, sequentially and
-inspectably (ADR-0003).
+"""The driver: runs the SDLC definition (ADR-0003, ADR-0007).
 
-definition.py says WHAT the process is; this file says how each named
-step is carried out, via the HANDLERS registry at the bottom — the
-explicit binding between the definition's step names and the
-sdlc_steps/ implementations. Engine mechanisms (invoker, repo host,
-store client, gate, rejection) do the lifting; nothing here encodes
-step knowledge.
+definition.py says WHAT the process is; this file carries out the
+PLANNING and RELEASE phases and the per-item governance around the edges
+(resume dispatch from store status, escalation overrides, conflict
+checks). The per-item PIPELINE itself — coder → review → verify →
+preprod → approver → gate, with its fix/flag loops and human gate — runs
+on ADK's graph engine through the PipelineExecutor port
+(orchestrator/executor.py; ADK impl in adapters/adk/): one graph, no
+imperative shadow. The single-shot handlers here (run_coder, review_once,
+verify_once, run_preprod_ci, run_approver) are what that graph's nodes
+call; the HANDLERS registry binds every definition step name to its
+implementation.
 
-Dispatch semantics: agents are invocations, not daemons. The driver
-invoking a step IS the event; the PR is the artifact between coder and
-reviewer; the store is the artifact between everything else.
+Coordination is through the store and artifacts, never in memory: the
+PR is the artifact between coder and reviewer; the store is the artifact
+between everything else and the single source of lifecycle truth (G3).
 """
 
 import asyncio
@@ -27,9 +31,9 @@ from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
                                            build_import_graph)
 from tools.diff_analysis import files_touched
 from orchestrator.activity import ActivityBoard
-from orchestrator.gate import (Decision, await_decision, check_decision,
-                               parse_command)
+from orchestrator.gate import Decision, check_decision, parse_command
 from orchestrator.invoker import AgentInvoker, Invocation
+from orchestrator.executor import PipelineExecutor
 from orchestrator.json_util import extract_json
 from orchestrator import schemas
 from orchestrator.rejection import Rejection, reject
@@ -60,6 +64,9 @@ class RunContext:
     repo_host: GitHubRepoHost
     invoker: AgentInvoker
     workspace: Workspace
+    # The per-item pipeline executor (ADR-0007 port). Injected by the
+    # composition root; None only in unit tests that never run an item.
+    executor: PipelineExecutor | None = None
     approved: list[ApprovedPR] = field(default_factory=list)
     # Concurrent preprod deploys against ONE Cloud Run service would
     # fight over revision creation; CI is the one per-item stage that
@@ -305,81 +312,6 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
     return verdict
 
 
-async def run_code_reviewer(ctx: RunContext, item: dict, pr: int,
-                            branch: str) -> bool:
-    # Resume idempotency: this head commit may already carry an approval.
-    sha = ctx.repo_host.get_pr(pr)["head_sha"]
-    comments = ctx.repo_host.get_review_threads(pr)
-    if _find_marker(comments, _marker("review", sha, "approve")) is not None:
-        print(f"[resume] PR #{pr}: review already approved {sha[:7]} — "
-              "skipping", flush=True)
-        return True
-
-    max_iterations = int(
-        ctx.project.policy("orchestrator")["max_fix_iterations"])
-
-    for iteration in range(max_iterations + 1):
-        # Agent-written code may not even parse; that is coder rework
-        # (one bounded fix round like any other), never an engine crash.
-        try:
-            verdict = await review_once(ctx, item, pr, iteration)
-        except UnparseableSource as broken:
-            if iteration >= max_iterations:
-                break
-            await reject(ctx.store, ctx.repo_host,
-                         Rejection(pr, "code_unparseable", "coder",
-                                   f"the code does not parse: {broken}"),
-                         actor="code_reviewer")
-            await run_coder(ctx, item, branch, feedback=(
-                f"Your change does not parse: {broken}. Fix the syntax "
-                "error so every file compiles and the tests run."))
-            continue
-
-        if verdict.verdict == "approve":
-            await ctx.audit("code_reviewer", "approve_review",
-                            {"pr": pr, "iterations": iteration + 1})
-            print(f"[review] PR #{pr} approved "
-                  f"(iteration {iteration + 1})", flush=True)
-            return True
-
-        if verdict.verdict == "out_of_scope":
-            await reject(ctx.store, ctx.repo_host,
-                         Rejection(pr, "out_of_scope", "author",
-                                   verdict.reasoning),
-                         actor="code_reviewer")
-            await ctx.set_status(item["id"], "rejected")
-            return False
-
-        if iteration >= max_iterations:
-            break
-        print(f"[review] PR #{pr} changes requested "
-              f"(iteration {iteration + 1}); coder fixing", flush=True)
-        changed, reply = await run_coder(
-            ctx, item, branch, feedback=verdict.model_dump_json(indent=2))
-        if not changed:
-            # Impasse: reviewer demanded changes, coder declined. Put
-            # the disagreement ON THE ARTIFACT and hand it to a human —
-            # re-reviewing an identical diff resolves nothing.
-            ctx.repo_host.post_comment(pr, (
-                "**🤖 AI coder — response to review (no code changes "
-                "made)**\n\n"
-                f"{reply or '(no reasoning returned)'}"))
-            await ctx.audit("code_reviewer", "escalate_to_human", {
-                "pr": pr, "rule": "coder declined the requested changes "
-                                  "(no-change fix round)"})
-            await ctx.set_status(item["id"], "escalated")
-            print(f"[review] PR #{pr} impasse: coder declined changes — "
-                  "escalated to a human", flush=True)
-            return False
-
-    await ctx.audit("code_reviewer", "escalate_to_human", {
-        "pr": pr, "rule": f"no approval after {max_iterations} fix iterations"})
-    await ctx.set_status(item["id"], "escalated")
-    print(f"[review] PR #{pr} escalated to human after "
-          f"{max_iterations} iterations", flush=True)
-    return False
-
-
 async def verify_once(ctx: RunContext, item: dict,
                       pr: int) -> verify_step.VerifyResult:
     """One verify pass (single-shot: reused by the Workflow expression).
@@ -412,47 +344,23 @@ async def verify_once(ctx: RunContext, item: dict,
     return result
 
 
-async def run_verify(ctx: RunContext, item: dict, pr: int,
-                     branch: str) -> verify_step.VerifyResult | None:
-    max_flag_fixes = int(
-        ctx.project.policy("orchestrator")["max_flag_fix_iterations"])
+async def escalate_item(ctx: RunContext, item: dict, pr: int, actor: str,
+                        rule: str) -> None:
+    """Hand one item to a human: audit the rule + set store status.
+    Shared by the ADK workflow nodes so every escalation path records
+    the same evidence the sequential driver used to."""
+    await ctx.audit(actor, "escalate_to_human", {"pr": pr, "rule": rule})
+    await ctx.set_status(item["id"], "escalated", pr)
+    print(f"[{item['id']}] escalated to human: {rule}", flush=True)
 
-    rule = f"flag still missing after {max_flag_fixes} fix"
-    for attempt in range(max_flag_fixes + 1):
-        try:
-            result = await verify_once(ctx, item, pr)
-        except UnparseableSource as broken:
-            # Same bounded rework loop as a missing flag: measurement is
-            # impossible until the code parses, so back to the coder.
-            rule = f"code still unparseable after {max_flag_fixes} fix"
-            if attempt >= max_flag_fixes:
-                break
-            await reject(ctx.store, ctx.repo_host,
-                         Rejection(pr, "code_unparseable", "coder",
-                                   f"the code does not parse: {broken}"),
-                         actor="verify")
-            await run_coder(ctx, item, branch, feedback=(
-                f"Your change does not parse: {broken}. Fix the syntax "
-                "error so every file compiles and the tests run."))
-            continue
-        if not result.needs_flag:
-            return result
 
-        if attempt >= max_flag_fixes:
-            break
-        await reject(ctx.store, ctx.repo_host,
-                     Rejection(pr, "policy_flag_required", "coder",
-                               f"verified risk {result.verified_risk} requires "
-                               f"a feature flag; none gates the new behavior"),
-                     actor="verify")
-        await run_coder(ctx, item, branch, feedback=(
-            "Policy violation: this change's verified risk is "
-            f"{result.verified_risk}, which requires the NEW behavior to be "
-            "gated behind a feature flag (default off) in flags.json. Wrap "
-            "it and keep tests covering both flag states."))
-
-    await ctx.audit("verify", "escalate_to_human", {"pr": pr, "rule": rule})
-    return None
+def review_already_approved(ctx: RunContext, pr: int) -> bool:
+    """Resume idempotency: this PR's current head already carries a
+    review approval (SHA-keyed marker), so the reviewer node skips a
+    duplicate review on a re-run (G5)."""
+    sha = ctx.repo_host.get_pr(pr)["head_sha"]
+    comments = ctx.repo_host.get_review_threads(pr)
+    return _find_marker(comments, _marker("review", sha, "approve")) is not None
 
 
 async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
@@ -520,63 +428,6 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     # The gate baseline is captured HERE, at dossier-post time: a human
     # who decides on GitHub before the gate first looks must be seen.
     return len(ctx.repo_host.get_review_threads(pr))
-
-
-async def run_approval_gate(ctx: RunContext, item: dict, pr: int,
-                            baseline: int) -> bool | None:
-    """True = approved, False = rejected, None = no decision within the
-    gate wait budget (the item keeps awaiting_approval; a later run
-    resumes the gate with a single look)."""
-    policy = ctx.project.policy("approver")
-    approvers = policy["approvers"]
-    mode = policy.get("gate_mode", "poll")
-    ctx.board.begin(item["id"], "approval_gate",
-                    f"PR #{pr} awaiting {approvers}")
-    print(f"[gate] awaiting /approve, /reject <reason>, or /hold on PR #{pr} "
-          f"from {approvers} (gate_mode: {mode})", flush=True)
-    audited_ignores: set = set()
-
-    while True:
-        if mode == "nudge":
-            # Human-nudged single check: the decision's AUTHORITY is the
-            # GitHub comment; pressing Enter (or resuming the ADK
-            # suspend) only triggers one look at it.
-            await asyncio.to_thread(
-                input, f"[gate] decide on PR #{pr} via a GitHub comment, "
-                       "then press Enter to check: ")
-            decision = await check_decision(ctx.repo_host, ctx.store, pr,
-                                            approvers, baseline,
-                                            audited_ignores)
-            if decision is None:
-                print("[gate] no decision from an allowlisted approver yet",
-                      flush=True)
-                continue
-        else:
-            wait = float(policy.get("gate_wait_minutes", 5)) * 60.0
-            try:
-                decision = await await_decision(
-                    ctx.repo_host, ctx.store, pr, approvers,
-                    baseline=baseline, timeout_seconds=wait)
-            except TimeoutError:
-                print(f"[gate] no decision on PR #{pr} within "
-                      f"{wait / 60:.0f}m — releasing this run; the item "
-                      "stays awaiting_approval and any rerun re-checks",
-                      flush=True)
-                return None
-
-        if decision.kind == "approve":
-            return True
-        if decision.kind == "reject":
-            await reject(ctx.store, ctx.repo_host,
-                         Rejection(pr, "human_declined", "backlog",
-                                   decision.reason or "no reason given"),
-                         actor="approval_gate")
-            return False
-        # A hold advances the baseline past itself so the NEXT command
-        # (e.g. a later /approve) becomes visible.
-        baseline = decision.comment_index + 1
-        print(f"[gate] PR #{pr} on hold by {decision.author}; "
-              "waiting for a final decision", flush=True)
 
 
 # --- release phase -----------------------------------------------------------
@@ -863,41 +714,21 @@ async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         await run_release_pass(ctx)
         return approved
 
-    if not await run_code_reviewer(ctx, item, pr, branch):
-        ctx.board.finish(item["id"], "stopped at review")
-        return None
-    verified = await run_verify(ctx, item, pr, branch)
-    if verified is None:
-        await ctx.set_status(item["id"], "escalated")
-        ctx.board.finish(item["id"], "stopped at verify (flag)")
-        return None
-    await ctx.set_status(item["id"], "verified")
-    async with ctx.ci_lock:
-        ci_ok = await run_preprod_ci(ctx, item, pr, verified)
-    if not ci_ok:
-        await ctx.set_status(item["id"], "failed")
-        ctx.board.finish(item["id"], "failed preprod")
-        return None
-    await ctx.set_status(item["id"], "preprod_passed")
-    baseline = await run_approver(ctx, item, pr, verified)
-    await ctx.set_status(item["id"], "awaiting_approval")
-    gate = await run_approval_gate(ctx, item, pr, baseline)
-    if gate is None:
-        ctx.board.finish(item["id"], "gate wait budget exhausted")
-        return None
-    if not gate:
-        await ctx.set_status(item["id"], "rejected")
-        ctx.board.finish(item["id"], "rejected at gate")
-        return None
-    await ctx.set_status(item["id"], "queued")
-    ctx.board.finish(item["id"], "queued for release")
-    approved = ApprovedPR(pr=pr, item=item, verified=verified)
-    ctx.approved.append(approved)
-    # Trickle release: an approval immediately gets a release decision —
-    # the pass covers the WHOLE unmerged queue, so earlier holds are
-    # reconsidered under the current situation too.
-    await run_release_pass(ctx)
-    return approved
+    # The per-item pipeline runs on ADK's engine (ADR-0007, Workstream A):
+    # the Workflow in adapters/adk/workflow.py IS the execution path — one
+    # graph, no imperative shadow. Its nodes call the same single-shot
+    # handlers (run_coder, review_once, verify_once, run_preprod_ci,
+    # run_approver) and set store status at each transition; the executor
+    # drives the gate's suspend/resume. `pr` is None for a fresh agent item
+    # (the coder node opens it) and set on resume (the coder node skips
+    # re-implementation). The store and ctx.approved carry the results.
+    outcome = await ctx.executor.run_item(ctx, item, branch, existing_pr=pr)
+    if outcome.kind == "queued":
+        # Trickle release: an approval immediately gets a release decision —
+        # the pass covers the WHOLE unmerged queue, so earlier holds are
+        # reconsidered under the current situation too.
+        await run_release_pass(ctx)
+    return None
 
 
 async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
@@ -988,26 +819,32 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
 
 
 # The explicit binding: definition step name -> handler.
+# Every definition step name binds to its implementation. Planning and
+# release steps are driver functions; the per-item steps are executed by
+# the ADK Workflow (adapters/adk/workflow.py) and bind to the single-shot
+# handlers its nodes call — the fix/flag/gate LOOPS are graph edges, not
+# Python loops (ADR-0007). `test_definition` asserts this map covers the
+# definition; `check_decision` is the gate's atom.
 HANDLERS = {
     "risk_assessor": run_risk_assessor,
     "sprint_packer": run_sprint_packer,
     "coder": run_coder,
-    "code_reviewer": run_code_reviewer,
-    "verify": run_verify,
+    "code_reviewer": review_once,
+    "verify": verify_once,
     "preprod_ci": run_preprod_ci,
     "approver": run_approver,
-    "approval_gate": run_approval_gate,
+    "approval_gate": check_decision,
     "incident_resolver": incident_resolver.run,
     "release_manager": run_release_pass,
 }
 
 
-def build_context(project: ProjectConfig,
-                  invoker: AgentInvoker) -> RunContext:
-    """The invoker arrives from the composition root (__main__), which
-    is the only place that chooses a framework (ADR-0007). The working
-    checkout is PROVISIONED by the engine itself (cloned into scratch,
-    healed if missing) — no pre-existing local copy is required."""
+def build_context(project: ProjectConfig, invoker: AgentInvoker,
+                  executor: PipelineExecutor) -> RunContext:
+    """The invoker and executor arrive from the composition root
+    (__main__), the only place that chooses a framework (ADR-0007). The
+    working checkout is PROVISIONED by the engine itself (cloned into
+    scratch, healed if missing) — no pre-existing local copy is required."""
     from orchestrator import provisioning
 
     repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
@@ -1019,4 +856,5 @@ def build_context(project: ProjectConfig,
         repo_host=repo_host,
         invoker=invoker,
         workspace=workspace,
+        executor=executor,
     )
