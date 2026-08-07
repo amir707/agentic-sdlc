@@ -21,6 +21,7 @@ error rate the monitor sees.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -53,9 +54,32 @@ def _source_dir() -> str:
     return value
 
 
+def _redact(arg: str) -> str:
+    """Secrets ride in --set-env-vars args (e.g. CONFIG_TOKEN=...); no
+    echo of a command — live or in an error — may show their values."""
+    return re.sub(r"((?:TOKEN|KEY|SECRET)[A-Z_]*=)[^,\s]+", r"\1<redacted>",
+                  arg)
+
+
 def _run(args: list[str]) -> None:
-    print("+", " ".join(args), flush=True)
-    subprocess.run(args, check=True)
+    print("+", " ".join(_redact(a) for a in args), flush=True)
+    # Drop the original exception (its args carry the raw command):
+    # raise clean, outside the except, with the redacted command only.
+    failed: int | None = None
+    try:
+        subprocess.run(args, check=True)
+    except subprocess.CalledProcessError as exc:
+        failed = exc.returncode
+    if failed is not None:
+        raise DeployError(
+            f"command failed (exit {failed}): "
+            + " ".join(_redact(a) for a in args))
+
+
+class DeployError(RuntimeError):
+    """A gcloud deploy/traffic command failed (redacted command in the
+    message). Callers treat this as an infrastructure failure of ONE
+    stage, never a reason to kill a whole run."""
 
 
 def _describe() -> dict:
