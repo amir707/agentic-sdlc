@@ -60,3 +60,110 @@ def test_deploy_error_fails_the_item_not_the_run(monkeypatch):
     assert ok is False
     assert any(d == "preprod_result" and f["passed"] is False
                and "<redacted>" in f["error"] for _, d, f in audits)
+
+
+def test_transient_deploy_failure_retries_once(monkeypatch):
+    """The fresh-project first-deploy race ('Requested entity was not
+    found') gets ONE retry — observed live: the identical rerun
+    succeeded. Bounded, like every loop."""
+    calls = []
+
+    def fake_execute(args):
+        calls.append(1)
+        if len(calls) == 1:
+            return 1, "ERROR: NOT_FOUND: Requested entity was not found."
+        return 0, ""
+    monkeypatch.setattr(deploy, "_execute", fake_execute)
+    monkeypatch.setattr(deploy.time, "sleep", lambda s: None)
+
+    deploy._run(["gcloud", "run", "deploy", "svc"])  # must not raise
+    assert len(calls) == 2
+
+
+def test_config_errors_fail_fast_without_retry(monkeypatch):
+    """A non-transient failure (config/build error) never retries — a
+    doubled 3-minute build on a genuine failure helps nobody."""
+    calls = []
+
+    def fake_execute(args):
+        calls.append(1)
+        return 1, "ERROR: --no-traffic not supported when creating a new service."
+    monkeypatch.setattr(deploy, "_execute", fake_execute)
+
+    with pytest.raises(deploy.DeployError) as exc:
+        deploy._run(["gcloud", "run", "deploy", "svc"])
+    assert len(calls) == 1
+    assert "--no-traffic not supported" in str(exc.value)  # the WHY surfaces
+
+
+def test_transient_retry_exhaustion_reports_redacted(monkeypatch):
+    def fake_execute(args):
+        return 1, "ERROR: UNAVAILABLE. CONFIG_TOKEN=leakyvalue in output"
+    monkeypatch.setattr(deploy, "_execute", fake_execute)
+    monkeypatch.setattr(deploy.time, "sleep", lambda s: None)
+
+    with pytest.raises(deploy.DeployError) as exc:
+        deploy._run(["gcloud", "x", "--set-env-vars", "CONFIG_TOKEN=leakyvalue"])
+    assert "leakyvalue" not in str(exc.value)
+    assert "CONFIG_TOKEN=<redacted>" in str(exc.value)
+
+
+def test_promote_failure_after_merge_escalates_not_crashes(monkeypatch):
+    """The half-released state: merge landed, traffic shift failed. Must
+    escalate the item with a manual-promote instruction — never kill the
+    release pass after a merge."""
+    sha = "a" * 40
+    marker = driver._marker("ci", sha, "passed")
+
+    class Verified:
+        needs_flag = False
+        primary_area = "payments"
+        verified_risk = "low"
+        flag = {"covered": True}
+        radius = set()
+    monkeypatch.setattr(driver, "verify_once", _async_return(Verified()))
+    monkeypatch.setattr(driver.schemas.ReleaseDecision, "model_validate",
+                        classmethod(lambda cls, d: SimpleNamespace(
+                            action="merge", reasoning="ok", factors={})))
+    monkeypatch.setattr(driver, "extract_json", lambda text: {})
+
+    def promote_boom(tag):
+        raise deploy.DeployError("command failed (exit 1): gcloud ... "
+                                 "— gcloud said: UNAVAILABLE")
+    monkeypatch.setattr(deploy, "promote", promote_boom)
+
+    audits, statuses = [], []
+
+    class Ctx:
+        repo_host = SimpleNamespace(
+            get_pr=lambda pr: {"head_sha": sha, "head_ref": "b"},
+            get_review_threads=lambda pr: [{"body": marker}],
+            merge_pr=lambda pr: "merged-sha")
+        workspace = SimpleNamespace(checkout_detached=lambda ref: None)
+        board = SimpleNamespace(begin=lambda *a, **k: None,
+                                finish=lambda *a, **k: None)
+        project = SimpleNamespace(
+            policy=lambda step: {"deploy_confidence_minutes": 10},
+            prompt=lambda step: "release-manager instructions")
+
+        async def invoke(self, spec, message):
+            return SimpleNamespace(text="{}")
+
+        async def audit(self, actor, decision, factors):
+            audits.append((actor, decision, factors))
+
+        async def set_status(self, item_id, status, pr=None):
+            statuses.append((item_id, status, pr))
+
+    outcome = asyncio.run(driver.decide_release_pr(
+        Ctx(), {"id": "PAY-1", "pr": 7}, confidence=10))
+    assert outcome == "escalated"
+    assert ("PAY-1", "escalated", 7) in statuses
+    assert any("traffic shift failed" in f.get("rule", "")
+               for _, _, f in audits)
+
+
+def _async_return(value):
+    async def fn(*a, **k):
+        return value
+    return fn

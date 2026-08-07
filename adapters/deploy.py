@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -61,25 +62,59 @@ def _redact(arg: str) -> str:
                   arg)
 
 
-def _run(args: list[str]) -> None:
+# Transient gcloud failure markers — retrying is the correct response.
+# "Requested entity was not found" is the fresh-project first-deploy race
+# (observed live: repo/service creation racing the deploy itself); the
+# rest are provider capacity/timeout flakes. Config and build errors
+# match none of these and fail fast.
+_TRANSIENT_MARKERS = (
+    "Requested entity was not found",
+    "UNAVAILABLE",
+    "DEADLINE_EXCEEDED",
+    "Internal error",
+)
+
+
+def _execute(args: list[str]) -> tuple[int, str]:
+    """Run gcloud, STREAMING its stderr (live build progress) while
+    keeping a tail for error classification and reporting."""
+    from collections import deque
+
+    proc = subprocess.Popen(args, stderr=subprocess.PIPE, text=True)
+    tail: deque[str] = deque(maxlen=15)
+    assert proc.stderr is not None
+    for line in proc.stderr:
+        print(line, end="", file=sys.stderr, flush=True)
+        tail.append(line)
+    proc.wait()
+    return proc.returncode, "".join(tail)
+
+
+def _run(args: list[str], attempts: int = 2) -> None:
+    """Bounded, transient-aware execution (the invoker's 429 pattern,
+    for infrastructure): a transient failure gets ONE retry; everything
+    else fails fast with the redacted command AND gcloud's actual error."""
     print("+", " ".join(_redact(a) for a in args), flush=True)
-    # Drop the original exception (its args carry the raw command):
-    # raise clean, outside the except, with the redacted command only.
-    failed: int | None = None
-    try:
-        subprocess.run(args, check=True)
-    except subprocess.CalledProcessError as exc:
-        failed = exc.returncode
-    if failed is not None:
+    for attempt in range(attempts):
+        code, stderr_tail = _execute(args)
+        if code == 0:
+            return
+        transient = any(m in stderr_tail for m in _TRANSIENT_MARKERS)
+        if transient and attempt < attempts - 1:
+            print(f"[deploy] transient failure (attempt {attempt + 1}/"
+                  f"{attempts}); retrying in 10s", flush=True)
+            time.sleep(10)
+            continue
         raise DeployError(
-            f"command failed (exit {failed}): "
-            + " ".join(_redact(a) for a in args))
+            f"command failed (exit {code}): "
+            + " ".join(_redact(a) for a in args)
+            + " — gcloud said: " + _redact(stderr_tail.strip()[-500:]))
 
 
 class DeployError(RuntimeError):
-    """A gcloud deploy/traffic command failed (redacted command in the
-    message). Callers treat this as an infrastructure failure of ONE
-    stage, never a reason to kill a whole run."""
+    """A gcloud deploy/traffic command failed (redacted command + error
+    in the message). Callers treat this as an infrastructure failure of
+    ONE stage, never a reason to kill a whole run."""
 
 
 def _describe() -> dict:
