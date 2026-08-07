@@ -100,6 +100,19 @@ Composition order at invocation:
 Second implementations are documented, never built: scope caps are
 verification budget, not typing budget.
 
+The concrete successor for the Pipeline/Sessions ports is ADK-native, not
+a fresh runtime: the per-item `Workflow` (already built for `adk web`)
+becomes the executing path under an `App` with `ResumabilityConfig` and a
+`DatabaseSessionService`, so ADK's graph engine supplies durable resume,
+bounded retry, and the human-gate suspend/resume — replacing the
+hand-rolled asyncio poll/sleep/semaphore loops. Release then moves to its
+own event-triggered loop (Cloud Scheduler / webhook → Pub/Sub → ambient
+trigger), per project. The store stays the governance/audit truth; ADK
+sessions own execution state only. The far end of this path is projects
+that supply their own pipeline definition and compose steps from an
+off-the-shelf behavior catalog, with the G-series guarantees staying
+engine-enforced rather than configurable.
+
 ## Framework boundary (ADR-0007)
 
 The SDLC core is framework-agnostic: `orchestrator/invoker.py` defines
