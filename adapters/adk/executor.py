@@ -13,6 +13,7 @@ owns execution-cursor state only.
 """
 
 import asyncio
+import os
 
 from google.adk.apps import App, ResumabilityConfig
 from google.adk.runners import InMemoryRunner
@@ -87,7 +88,11 @@ async def run_item_workflow(ctx, item: dict, branch: str,
 
     policy = ctx.project.policy("approver")
     mode = policy.get("gate_mode", "poll")
-    budget = float(policy.get("gate_wait_minutes", 5)) * 60.0
+    # GATE_WAIT_MINUTES env overrides policy: the resident sprint service
+    # sets it to 0 so an EVENT-triggered pass gives every gate exactly one
+    # authenticated look and never waits — the next event re-checks.
+    budget = float(os.environ.get("GATE_WAIT_MINUTES")
+                   or policy.get("gate_wait_minutes", 5)) * 60.0
     poll = float(policy.get("gate_poll_seconds", 10))
 
     message = _start_message()
@@ -103,6 +108,13 @@ async def run_item_workflow(ctx, item: dict, branch: str,
             return ItemOutcome(kind="escalated", pr=existing_pr)
 
         pr = _pr_from_interrupt(interrupt)
+        if budget <= 0:
+            # Event semantics regardless of gate_mode: one look happened
+            # inside the gate node; park and let the next event re-check.
+            print(f"[gate] PR #{pr}: no decision on this look — the item "
+                  "stays awaiting_approval; the next event re-checks",
+                  flush=True)
+            return ItemOutcome(kind="awaiting", pr=pr)
         if mode == "nudge":
             # The decision's authority is the GitHub comment; pressing
             # Enter (like the ADK resume) only triggers one look at it.

@@ -57,6 +57,12 @@ release-service:
 	$(require_project)
 	$(PYTHON) -m orchestrator.release_service --project $(PROJECT)
 
+# The RESIDENT sprint orchestrator: stays awake listening; one sprint
+# resume pass per event (each awaiting gate gets exactly one look).
+orchestrate-service:
+	$(require_project)
+	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL)
+
 deploy-baseline:
 	$(require_project)
 	PROJECT_CHECKOUT_DIR=$$($(PYTHON) -m orchestrator.provisioning --project $(PROJECT)) \
@@ -113,4 +119,4 @@ adk-web:
 test:
 	$(PYTHON) -m pytest -q
 
-.PHONY: seed mcp monitor orchestrate release release-service deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test
+.PHONY: seed mcp monitor orchestrate orchestrate-service release release-service deploy-baseline reset-demo reset-item demo status watch try-setup verify-demo adk-web test

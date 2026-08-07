@@ -37,6 +37,7 @@ COMPOSITION_ROOTS = {
     ROOT / "orchestrator" / "__main__.py",
     ROOT / "orchestrator" / "release.py",
     ROOT / "orchestrator" / "release_service.py",
+    ROOT / "orchestrator" / "sprint_service.py",
 }
 
 
