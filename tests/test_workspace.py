@@ -200,3 +200,40 @@ def test_worktree_resumes_branch_held_by_base_checkout(repos):
     ws.detach()
     worktree.start_branch("item/CAT-201-x")
     assert _git(base, "branch", "--show-current") == ""
+
+
+# --- credential redaction ----------------------------------------------------
+# Tokens ride in clone/push URLs by design (transient, never in config),
+# so a FAILED clone/push must never echo the URL raw into a traceback —
+# that is how a PAT ends up in terminal scrollback and pasted logs.
+
+def test_failed_clone_redacts_the_token(tmp_path, monkeypatch):
+    from orchestrator import provisioning
+
+    monkeypatch.setenv("AGENTIC_SDLC_SCRATCH", str(tmp_path / "scratch"))
+    secret = "github_pat_SUPERSECRET"
+    with pytest.raises(RuntimeError) as exc:
+        provisioning.provision(
+            "proj", f"https://x-access-token:{secret}@localhost:1/none.git")
+    message = str(exc.value)
+    assert secret not in message
+    assert "<redacted>" in message
+    # The original CalledProcessError (whose args hold the raw URL) must
+    # be fully dropped, not merely display-suppressed.
+    assert exc.value.__context__ is None
+    assert exc.value.__cause__ is None
+
+
+def test_failed_push_redacts_the_token(tmp_path):
+    base = tmp_path / "checkout"
+    base.mkdir()
+    subprocess.run(["git", "init", "-q", str(base)], check=True)
+    ws = Workspace(base)
+
+    secret = "github_pat_SUPERSECRET"
+    with pytest.raises(RuntimeError) as exc:
+        ws.push("main", f"https://x-access-token:{secret}@localhost:1/n.git")
+    message = str(exc.value)
+    assert secret not in message
+    assert "<redacted>" in message
+    assert exc.value.__context__ is None
