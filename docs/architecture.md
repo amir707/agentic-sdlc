@@ -62,7 +62,7 @@ flowchart LR
 | Release manager | reasoning agent (Gemini) | weighs incidents, closures, confidence windows |
 | Synthetic monitor | deterministic prober | threshold check on a sliding window |
 | Incident resolver | deterministic tool | hysteresis rule; separate from detection by role |
-| Orchestrator | Python driver (planning + release) + ADK Workflow (per-item) | the per-item pipeline runs on ADK's graph engine; the driver owns planning, resume dispatch, and release (ADR-0003, ADR-0007) |
+| Orchestrator | Python driver (planning) + two ADK Workflows (per-item, release) | the per-item pipeline and the release pass each run as their own ADK graph — separate control loops with separate clocks; the driver owns planning and resume dispatch; release is event-driven over `status=queued` in the store, one pass per trigger (`python -m orchestrator.release`) (ADR-0003, ADR-0007) |
 
 ## The one MCP boundary
 
@@ -119,22 +119,25 @@ The SDLC core is framework-agnostic: `orchestrator/invoker.py` defines
 the AgentInvoker port (AgentSpec in — prompt, model name, declared tool
 needs — Invocation out), and `sdlc_steps/*/spec.py` DECLARE tools
 (plain callables, or a `StoreTools` filter) rather than constructing
-them. Two ports draw the boundary: `orchestrator/invoker.py`
+them. Three ports draw the boundary: `orchestrator/invoker.py`
 (AgentInvoker, agent turns) and `orchestrator/executor.py`
-(PipelineExecutor, the per-item pipeline). Exactly one package speaks
-ADK: `adapters/adk/` materializes specs into `LlmAgent`s (LiteLLM
-bridging, MCP toolsets, token metering via `after_model_callback`,
-`output_schema` on the tool-less approver) AND *executes* the per-item
-pipeline as a native ADK 2 `Workflow` (`adapters/adk/workflow.py` builds
-the graph, `adapters/adk/executor.py` runs it on an `App`/`Runner` with
-resumability) — the fix/flag loops are routed cycle edges and the human
-gate is a native `RequestInput` suspend, not hand-written control flow.
-The composition root (`orchestrator/__main__.py`) is the only file that
-chooses a framework, injecting both ports. `tests/test_framework_boundary.py`
-enforces the boundary structurally (the core imports no framework),
-`tests/test_item_workflow.py` runs the graph end-to-end on ADK's engine
-with handlers stubbed, and structured verdicts (`orchestrator/schemas.py`)
-validate every agent decision at the boundary.
+(PipelineExecutor, the per-item pipeline; ReleaseExecutor, the release
+pass). Exactly one package speaks ADK: `adapters/adk/` materializes
+specs into `LlmAgent`s (LiteLLM bridging, MCP toolsets, token metering
+via `after_model_callback`, `output_schema` on the tool-less approver)
+AND *executes* both control loops as native ADK 2 `Workflow`s — the
+per-item pipeline (`workflow.py` builds the graph, `executor.py` runs
+it; fix/flag loops are routed cycle edges, the human gate is a native
+`RequestInput` suspend) and the release pass (`release_workflow.py`:
+incident hygiene → store-queue walk as a routed cycle, one PR at a
+time). Two composition roots choose the framework
+(`orchestrator/__main__.py` and `orchestrator/release.py`), injecting
+the ports each runs. `tests/test_framework_boundary.py` enforces the
+boundary structurally (the core imports no framework);
+`tests/test_item_workflow.py` and `tests/test_release_workflow.py` run
+both graphs end-to-end on ADK's engine with handlers stubbed; structured
+verdicts (`orchestrator/schemas.py`) validate every agent decision at
+the boundary.
 
 Dev loop: `make adk-web` (entries in `tests/debug/adk_web/`, one shared
 bootstrap) serves each reasoning worker in `adk web` with exactly the

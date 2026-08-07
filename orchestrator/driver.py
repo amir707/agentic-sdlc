@@ -33,11 +33,11 @@ from tools.diff_analysis import files_touched
 from orchestrator.activity import ActivityBoard
 from orchestrator.gate import Decision, check_decision, parse_command
 from orchestrator.invoker import AgentInvoker, Invocation
-from orchestrator.executor import PipelineExecutor
+from orchestrator.executor import PipelineExecutor, ReleaseExecutor
 from orchestrator.json_util import extract_json
 from orchestrator import schemas
 from orchestrator.rejection import Rejection, reject
-from adapters.repo_host import GitHubRepoHost
+from adapters.repo_host import GitHubRepoHost, RepoHostError
 from adapters.store_client import DeliveryStore
 from orchestrator.workspace import Workspace, WorkspaceFactory
 from adapters import deploy
@@ -50,24 +50,17 @@ from sdlc_steps.risk_assessor import spec as assessor_spec
 
 
 @dataclass
-class ApprovedPR:
-    pr: int
-    item: dict
-    verified: verify_step.VerifyResult
-    merged: bool = False
-
-
-@dataclass
 class RunContext:
     project: ProjectConfig
     store: DeliveryStore
     repo_host: GitHubRepoHost
     invoker: AgentInvoker
     workspace: Workspace
-    # The per-item pipeline executor (ADR-0007 port). Injected by the
-    # composition root; None only in unit tests that never run an item.
+    # The two ADR-0007 execution ports, injected by the composition root
+    # (None only in unit tests that never run them): the per-item pipeline
+    # and the release pass — separate Workflows, separate clocks.
     executor: PipelineExecutor | None = None
-    approved: list[ApprovedPR] = field(default_factory=list)
+    release_executor: ReleaseExecutor | None = None
     # Concurrent preprod deploys against ONE Cloud Run service would
     # fight over revision creation; CI is the one per-item stage that
     # must queue even when coders run in parallel.
@@ -432,148 +425,178 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
 
 # --- release phase -----------------------------------------------------------
 
+async def release_queue(ctx: RunContext) -> list[dict]:
+    """PRs awaiting release: the backlog items the STORE marks `queued`
+    (a project's store is that one project's world, so this is inherently
+    per-project). The release loop reads THIS, never an in-memory list —
+    so it is resumable and independent of the sprint process that queued
+    them. Workstream B: release is a peer loop over store state."""
+    items = await ctx.store.call("list_backlog")
+    return [i for i in items
+            if i.get("status") == "queued" and i.get("pr")]
+
+
 async def run_release_pass(ctx: RunContext) -> None:
+    """One release pass — run as its own ADK Workflow (Workstream B).
+    Release has a different clock and ecosystem than the sprint, so it is
+    its own first-class ADK graph behind the ReleaseExecutor port
+    (adapters/adk/release_workflow.py); the lock serializes trickle calls
+    within one process."""
     async with ctx.release_lock:
-        await _release_pass_locked(ctx)
+        await ctx.release_executor.run_pass(ctx)
 
 
-async def _release_pass_locked(ctx: RunContext) -> None:
-    ctx.board.begin("RELEASE", "incident_resolver", "checking recovery")
-    await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
-    queue = [a for a in ctx.approved if not a.merged]
-    if not queue:
-        ctx.board.finish("RELEASE", "queue empty")
-        print("[release] queue empty", flush=True)
-        return
-    # One PR, one decision, one deployment at a time — strictly in a
-    # row. Each merge records its deploy BEFORE the next decision, so
-    # the release manager sees it as a fresh same-area deploy and can
-    # postpone stacking per its judgment rules (confidence window).
-    confidence = ctx.project.policy(
-        "release_manager")["deploy_confidence_minutes"]
-    for entry in queue:
-        # DETERMINISTIC MERGE GATE (capability, not judgment): the PR's
-        # CURRENT head commit must carry a passing preprod deploy. If it
-        # does not — a commit landed after approval — the gate
-        # REMEDIATES: re-verify and re-deploy that head to preprod now;
-        # only failure blocks the merge.
-        pr_data = ctx.repo_host.get_pr(entry.pr)
-        head = pr_data["head_sha"]
-        comments = ctx.repo_host.get_review_threads(entry.pr)
-        if _find_marker(comments, _marker("ci", head, "passed")) is None:
-            print(f"[release] PR #{entry.pr}: head {head[:7]} has no "
-                  "passing preprod — verifying and deploying it now",
-                  flush=True)
-            # Detached: another worktree may hold the branch in
-            # parallel mode; CI only needs the tree + sha.
-            ctx.workspace.checkout_detached(pr_data["head_ref"])
-            try:
-                fresh = await verify_once(ctx, entry.item, entry.pr)
-            except UnparseableSource as broken:
-                # No rework loop this late: post-approval commits are a
-                # human's to answer for. Block the merge and escalate.
-                await ctx.audit("release_guard", "hold_merge", {
-                    "pr": entry.pr, "head_sha": head,
-                    "rule": f"post-approval head does not parse: {broken}"})
-                await ctx.set_status(entry.item["id"], "escalated")
-                print(f"[release] BLOCKED PR #{entry.pr}: head "
-                      f"{head[:7]} does not parse — escalated", flush=True)
-                continue
-            if fresh.needs_flag:
-                await ctx.audit("release_guard", "hold_merge", {
-                    "pr": entry.pr, "head_sha": head,
-                    "rule": "post-approval head violates the flag policy"})
-                await ctx.set_status(entry.item["id"], "escalated")
-                print(f"[release] BLOCKED PR #{entry.pr}: new head "
-                      "violates flag policy — escalated", flush=True)
-                continue
-            entry.verified = fresh
-            async with ctx.ci_lock:
-                ci_ok = await run_preprod_ci(ctx, entry.item, entry.pr,
-                                             fresh)
-            ctx.board.finish(entry.item["id"],
-                             "head re-verified + preprod re-deployed")
-            if not ci_ok:
-                await ctx.audit("release_guard", "hold_merge", {
-                    "pr": entry.pr, "head_sha": head,
-                    "rule": "preprod failed for the current head"})
-                await ctx.set_status(entry.item["id"], "failed")
-                print(f"[release] BLOCKED PR #{entry.pr}: preprod failed "
-                      "for head {0}".format(head[:7]), flush=True)
-                continue
+async def decide_release_pr(ctx: RunContext, item: dict,
+                            confidence: float) -> str:
+    """Decide and act on ONE queued PR: re-verify the head (the
+    deterministic merge gate), ensure a passing preprod deploy, ask the
+    release manager, then merge or hold. Returns the outcome
+    ("merged" | "held" | "escalated" | "failed"). Called per PR by the
+    release Workflow's node — the release-manager agent stays behind the
+    AgentInvoker port (ADR-0007), exactly as the coder/reviewer do.
 
-        ctx.board.begin("RELEASE", "release_manager",
-                        f"deciding PR #{entry.pr}")
-        payload = {
-            "task": ("Decide merge or hold for THIS ONE PR, right now. "
-                     "Consult the store (open incidents, recent deploys, "
-                     "health samples) and weigh your judgment rules — "
-                     "especially: never merge into an area with an open "
-                     "incident, and postpone when a recent PRODUCTION "
-                     "deploy (traffic='100') in the same area or with an "
-                     "overlapping closure has not yet shown healthy signal "
-                     "within the confidence window. Deploy records with "
-                     "traffic='preprod' are zero-traffic CI evidence — "
-                     "ignore them; every PR has one by construction. "
-                     'Reply ONLY with JSON: {"pr": ' + str(entry.pr) +
-                     ', "action": "merge|hold", "reasoning": "...", '
-                     '"factors": {}}'),
-            "pr": {
-                "pr": entry.pr, "item": entry.item["id"],
-                "area": entry.verified.primary_area,
-                "verified_risk": entry.verified.verified_risk,
-                "feature_flagged": entry.verified.flag["covered"],
-                "dependency_closure": sorted(entry.verified.radius),
-            },
-            "deploy_confidence_minutes": confidence,
-        }
-        result = await ctx.invoke(rm_spec.build(ctx.project),
-                                  json.dumps(payload, indent=2))
-        decision = schemas.ReleaseDecision.model_validate(
-            extract_json(result.text))
+    Degrade, don't die: a repo-host failure on THIS PR (e.g. the store
+    says queued but the PR does not exist — store/GitHub disagree after
+    a repo reset) escalates this one item; it never aborts the pass, so
+    the rest of the queue still gets its decisions."""
+    try:
+        return await _decide_release_pr(ctx, item, confidence)
+    except RepoHostError as exc:
+        await ctx.audit("release_guard", "escalate_to_human", {
+            "pr": item["pr"], "item": item["id"],
+            "rule": "repo host error while releasing this PR — the store "
+                    "and the repo may disagree (reset-item to replay, or "
+                    "reseed if the repo was recreated)",
+            "error": str(exc)[:200]})
+        await ctx.set_status(item["id"], "escalated", item["pr"])
+        print(f"[release] BLOCKED PR #{item['pr']}: repo host error — "
+              f"escalated ({str(exc)[:80]})", flush=True)
+        return "escalated"
 
-        factors = {"pr": entry.pr, "area": entry.verified.primary_area,
-                   "verified_risk": entry.verified.verified_risk,
-                   "feature_flagged": entry.verified.flag["covered"],
-                   **decision.factors,
-                   "reasoning": decision.reasoning}
-        if decision.action == "merge":
-            try:
-                ctx.repo_host.merge_pr(entry.pr)
-            except Exception as exc:  # noqa: BLE001 — degrade, don't die
-                # Typically 405: branch not mergeable (main advanced and
-                # the branch conflicts — flags.json is the usual magnet).
-                # Auto-rebase is a documented successor, not built: the
-                # PR stays queued with an audited reason for a human
-                # (rebase, or make reset-item to replay).
-                await ctx.audit("release_guard", "hold_merge", {
-                    "pr": entry.pr,
-                    "rule": "merge failed — branch likely conflicts with "
-                            "advanced main; rebase or reset-item",
-                    "error": str(exc)[:200]})
-                print(f"[release] BLOCKED PR #{entry.pr}: not mergeable "
-                      f"({str(exc)[:80]})", flush=True)
-                continue
-            deploy.promote(f"pr-{entry.pr}")
-            await ctx.store.call("record_deploy", pr=entry.pr,
-                                 revision=f"pr-{entry.pr}", traffic="100",
-                                 area=entry.verified.primary_area)
-            await ctx.audit("release_manager", "merge_pr", factors)
-            await ctx.set_status(entry.item["id"], "released")
-            entry.merged = True
-            print(f"[release] MERGED PR #{entry.pr} "
-                  f"(traffic -> pr-{entry.pr})", flush=True)
-        else:
-            await ctx.audit("release_manager", "hold_merge", factors)
-            print(f"[release] HELD PR #{entry.pr}: "
-                  f"{decision.reasoning}", flush=True)
 
-    ctx.board.finish("RELEASE", "pass complete")
+async def _decide_release_pr(ctx: RunContext, item: dict,
+                             confidence: float) -> str:
+    pr = item["pr"]
+    # Recompute `verified` from the CURRENT head — no VerifyResult is
+    # carried from the sprint run (stateless release). verify_once is
+    # deterministic and idempotent; this IS the deterministic merge gate.
+    pr_data = ctx.repo_host.get_pr(pr)
+    head = pr_data["head_sha"]
+    ctx.workspace.checkout_detached(pr_data["head_ref"])
+    try:
+        verified = await verify_once(ctx, item, pr)
+    except UnparseableSource as broken:
+        # No rework loop this late: post-approval commits are a human's to
+        # answer for. Block the merge and escalate.
+        await ctx.audit("release_guard", "hold_merge", {
+            "pr": pr, "head_sha": head,
+            "rule": f"post-approval head does not parse: {broken}"})
+        await ctx.set_status(item["id"], "escalated", pr)
+        print(f"[release] BLOCKED PR #{pr}: head {head[:7]} does not parse "
+              "— escalated", flush=True)
+        return "escalated"
+    if verified.needs_flag:
+        await ctx.audit("release_guard", "hold_merge", {
+            "pr": pr, "head_sha": head,
+            "rule": "post-approval head violates the flag policy"})
+        await ctx.set_status(item["id"], "escalated", pr)
+        print(f"[release] BLOCKED PR #{pr}: head violates flag policy "
+              "— escalated", flush=True)
+        return "escalated"
+    comments = ctx.repo_host.get_review_threads(pr)
+    if _find_marker(comments, _marker("ci", head, "passed")) is None:
+        print(f"[release] PR #{pr}: head {head[:7]} has no passing preprod "
+              "— deploying it now", flush=True)
+        async with ctx.ci_lock:
+            ci_ok = await run_preprod_ci(ctx, item, pr, verified)
+        ctx.board.finish(item["id"], "head re-verified + preprod deployed")
+        if not ci_ok:
+            await ctx.audit("release_guard", "hold_merge", {
+                "pr": pr, "head_sha": head,
+                "rule": "preprod failed for the current head"})
+            await ctx.set_status(item["id"], "failed", pr)
+            print(f"[release] BLOCKED PR #{pr}: preprod failed for head "
+                  f"{head[:7]}", flush=True)
+            return "failed"
+
+    ctx.board.begin("RELEASE", "release_manager", f"deciding PR #{pr}")
+    payload = {
+        "task": ("Decide merge or hold for THIS ONE PR, right now. "
+                 "Consult the store (open incidents, recent deploys, "
+                 "health samples) and weigh your judgment rules — "
+                 "especially: never merge into an area with an open "
+                 "incident, and postpone when a recent PRODUCTION "
+                 "deploy (traffic='100') in the same area or with an "
+                 "overlapping closure has not yet shown healthy signal "
+                 "within the confidence window. Deploy records with "
+                 "traffic='preprod' are zero-traffic CI evidence — "
+                 "ignore them; every PR has one by construction. "
+                 'Reply ONLY with JSON: {"pr": ' + str(pr) +
+                 ', "action": "merge|hold", "reasoning": "...", '
+                 '"factors": {}}'),
+        "pr": {
+            "pr": pr, "item": item["id"],
+            "area": verified.primary_area,
+            "verified_risk": verified.verified_risk,
+            "feature_flagged": verified.flag["covered"],
+            "dependency_closure": sorted(verified.radius),
+        },
+        "deploy_confidence_minutes": confidence,
+    }
+    result = await ctx.invoke(rm_spec.build(ctx.project),
+                              json.dumps(payload, indent=2))
+    decision = schemas.ReleaseDecision.model_validate(
+        extract_json(result.text))
+
+    factors = {"pr": pr, "area": verified.primary_area,
+               "verified_risk": verified.verified_risk,
+               "feature_flagged": verified.flag["covered"],
+               **decision.factors,
+               "reasoning": decision.reasoning}
+    if decision.action == "merge":
+        try:
+            ctx.repo_host.merge_pr(pr)
+        except Exception as exc:  # noqa: BLE001 — degrade, don't die
+            # Typically 405: branch not mergeable (main advanced and the
+            # branch conflicts — flags.json is the usual magnet). Auto-rebase
+            # is a documented successor, not built: the PR stays queued with
+            # an audited reason for a human (rebase, or make reset-item).
+            await ctx.audit("release_guard", "hold_merge", {
+                "pr": pr,
+                "rule": "merge failed — branch likely conflicts with "
+                        "advanced main; rebase or reset-item",
+                "error": str(exc)[:200]})
+            print(f"[release] BLOCKED PR #{pr}: not mergeable "
+                  f"({str(exc)[:80]})", flush=True)
+            return "held"
+        deploy.promote(f"pr-{pr}")
+        await ctx.store.call("record_deploy", pr=pr,
+                             revision=f"pr-{pr}", traffic="100",
+                             area=verified.primary_area)
+        await ctx.audit("release_manager", "merge_pr", factors)
+        await ctx.set_status(item["id"], "released", pr)
+        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})", flush=True)
+        return "merged"
+    # Held: the item STAYS queued in the store and is reconsidered on the
+    # next release EVENT (incident cleared, confidence window passed).
+    await ctx.audit("release_manager", "hold_merge", factors)
+    print(f"[release] HELD PR #{pr}: {decision.reasoning}", flush=True)
+    return "held"
+
+
+# NO in-process recheck loop: "when to reconsider a held PR" is answered
+# by an EVENT — a Cloud Scheduler tick or a GitHub webhook (incident
+# recovery / approval) → Pub/Sub → ADK's ambient-trigger endpoint
+# (get_fast_api_app(trigger_sources=["pubsub"])), each firing exactly one
+# run_release_pass over store state. A held PR simply stays queued until
+# the next event; there is nothing to poll, so there is no asyncio.sleep.
+# `python -m orchestrator.release` (make release) is the same single pass
+# run manually; see the runbook for the trigger wiring.
 
 
 # --- the run -----------------------------------------------------------------
 
-async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
+async def process_item(ctx: RunContext, item: dict) -> None:
     """One item through the per-item phase — with a governed boundary:
     an agent blowing its step budget (runaway guard) is that ITEM's
     failure, escalated like any other; it never kills the sprint."""
@@ -593,7 +616,7 @@ async def process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         return None
 
 
-async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
+async def _process_item(ctx: RunContext, item: dict) -> None:
     """One item's full journey (self-contained: parallel workers run
     this concurrently, each with its own workspace)."""
     branch = _branch(item)
@@ -691,28 +714,13 @@ async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
         return None
 
     if status == "queued":
-        # Human approval already given (previous run): recompute the
-        # verified labels (cheap, deterministic) and requeue directly —
-        # the gate is NOT asked twice for the same commit.
-        try:
-            verified = await verify_once(ctx, item, pr)
-        except UnparseableSource as broken:
-            # Same stance as the release gate: an approved-but-broken
-            # head is a human's to answer for, and one PR's syntax
-            # error never kills the run.
-            await ctx.audit("release_guard", "escalate_to_human", {
-                "pr": pr, "item": item["id"],
-                "rule": f"queued head does not parse: {broken}"})
-            await ctx.set_status(item["id"], "escalated")
-            ctx.board.finish(item["id"], "escalated (head does not parse)")
-            print(f"[{item['id']}] BLOCKED PR #{pr}: head does not parse "
-                  "— escalated", flush=True)
-            return None
+        # Human approval already given (previous run). The store-sourced
+        # release pass re-verifies this head, re-checks the flag policy,
+        # and decides — nothing to set up here beyond triggering it (the
+        # gate is NOT asked twice for the same commit).
         ctx.board.finish(item["id"], "requeued for release")
-        approved = ApprovedPR(pr=pr, item=item, verified=verified)
-        ctx.approved.append(approved)
         await run_release_pass(ctx)
-        return approved
+        return None
 
     # The per-item pipeline runs on ADK's engine (ADR-0007, Workstream A):
     # the Workflow in adapters/adk/workflow.py IS the execution path — one
@@ -721,7 +729,7 @@ async def _process_item(ctx: RunContext, item: dict) -> ApprovedPR | None:
     # run_approver) and set store status at each transition; the executor
     # drives the gate's suspend/resume. `pr` is None for a fresh agent item
     # (the coder node opens it) and set on resume (the coder node skips
-    # re-implementation). The store and ctx.approved carry the results.
+    # re-implementation). The STORE carries the results (status=queued),
     outcome = await ctx.executor.run_item(ctx, item, branch, existing_pr=pr)
     if outcome.kind == "queued":
         # Trickle release: an approval immediately gets a release decision —
@@ -772,7 +780,7 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
         factory = WorkspaceFactory(ctx.workspace.dir)
         limit = asyncio.Semaphore(parallel)
 
-        async def worker(item: dict) -> ApprovedPR | None:
+        async def worker(item: dict) -> None:
             async with limit:
                 item_ctx = replace(
                     ctx, workspace=factory.for_item(item["id"]))
@@ -788,28 +796,13 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
         for item in selected:
             await process_item(ctx, item)
 
-    # Trickle passes already ran per approval; this final pass gives any
-    # remaining holds one more look now that the sprint is complete.
+    # Trickle passes already ran per approval; one final pass gives any
+    # remaining holds a look now that the sprint is complete. It is NOT a
+    # waiting loop — a PR still held here stays queued in the store, and a
+    # later release EVENT (Scheduler tick / webhook → run_release_pass, or
+    # `make release`) reconsiders it. Release does not depend on this
+    # process staying alive (Workstream B).
     await run_release_pass(ctx)
-    # AUTONOMOUS release rechecks: "when to reconsider a held PR" is
-    # answered by the world (incident recovery, confidence windows)
-    # plus policy — never by a terminal prompt. Bounded like every
-    # other loop; held PRs stay queued in the store when the budget
-    # runs out, and any later run reconsiders them.
-    flow = ctx.project.policy("orchestrator")
-    recheck = float(flow["release_recheck_seconds"])
-    budget = float(flow["max_release_wait_minutes"]) * 60.0
-    waited = 0.0
-    while any(not a.merged for a in ctx.approved) and waited < budget:
-        print(f"[release] held PRs remain — next pass in {recheck:.0f}s "
-              f"(wait budget left: {(budget - waited) / 60:.0f}m)",
-              flush=True)
-        await asyncio.sleep(recheck)
-        waited += recheck
-        await run_release_pass(ctx)
-    if any(not a.merged for a in ctx.approved):
-        print("[release] wait budget exhausted — held PRs stay queued; "
-              "a rerun reconsiders them", flush=True)
 
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps
@@ -840,11 +833,15 @@ HANDLERS = {
 
 
 def build_context(project: ProjectConfig, invoker: AgentInvoker,
-                  executor: PipelineExecutor) -> RunContext:
-    """The invoker and executor arrive from the composition root
-    (__main__), the only place that chooses a framework (ADR-0007). The
-    working checkout is PROVISIONED by the engine itself (cloned into
-    scratch, healed if missing) — no pre-existing local copy is required."""
+                  executor: PipelineExecutor | None = None,
+                  release_executor: ReleaseExecutor | None = None
+                  ) -> RunContext:
+    """The invoker and executors arrive from a composition root
+    (__main__ or release.py), the only files that choose a framework
+    (ADR-0007). Each entry point injects only what it runs: release.py
+    leaves the per-item executor None. The working checkout is
+    PROVISIONED by the engine itself (cloned into scratch, healed if
+    missing) — no pre-existing local copy is required."""
     from orchestrator import provisioning
 
     repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
@@ -857,4 +854,5 @@ def build_context(project: ProjectConfig, invoker: AgentInvoker,
         invoker=invoker,
         workspace=workspace,
         executor=executor,
+        release_executor=release_executor,
     )

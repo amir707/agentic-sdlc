@@ -27,3 +27,13 @@ class PipelineExecutor(Protocol):
                        existing_pr: int | None = None) -> ItemOutcome:
         """Run one backlog item's per-item pipeline to a terminal state."""
         ...
+
+
+class ReleaseExecutor(Protocol):
+    async def run_pass(self, ctx) -> None:
+        """Run ONE release pass over store state (Workstream B). Release
+        is its own control loop with its own clock (approvals, incidents,
+        confidence windows), so it is its own executor — a separate ADK
+        Workflow, not a branch of the per-item one. The core calls this
+        port; the ADK implementation runs the release graph."""
+        ...

@@ -29,15 +29,19 @@ def _imports(py_file: Path) -> set[str]:
     return modules
 
 
-# The composition root is the ONE file allowed to choose a framework
-# (it instantiates the adapter and injects it into the core).
-COMPOSITION_ROOT = ROOT / "orchestrator" / "__main__.py"
+# The composition roots are the entry points allowed to choose a framework
+# (they instantiate the adapters and inject them into the core): the sprint
+# orchestrator and the standalone release loop.
+COMPOSITION_ROOTS = {
+    ROOT / "orchestrator" / "__main__.py",
+    ROOT / "orchestrator" / "release.py",
+}
 
 
 def test_core_never_imports_a_framework():
     for package in CORE_PACKAGES:
         for py_file in (ROOT / package).rglob("*.py"):
-            if py_file == COMPOSITION_ROOT:
+            if py_file in COMPOSITION_ROOTS:
                 continue
             for module in _imports(py_file):
                 assert not module.startswith(FRAMEWORK_PREFIXES), (

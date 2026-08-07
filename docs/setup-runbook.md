@@ -291,6 +291,32 @@ gcloud run jobs executions list --job orchestrator --region "$REGION"
 gcloud run jobs executions cancel <EXECUTION-NAME> --region "$REGION" --quiet
 ```
 
+## 13. Release: event-driven, one pass per trigger (Workstream B)
+
+Release reads its queue from the STORE (`status=queued` PRs), not from a
+sprint process's memory, so it runs on its own — **one pass per event,
+no in-process wait loop**. A PR held on a pass (open incident, confidence
+window not elapsed) simply stays `queued`; the NEXT event reconsiders it.
+
+```bash
+# one release pass over store state, then exit:
+make release PROJECT=candidate-app
+#   → python -m orchestrator.release --project <name>
+```
+
+The event is the loop. In the cloud that event is an **ADK ambient
+trigger**: a **Cloud Scheduler** job (the confidence-window timer) and a
+**GitHub webhook** (PR approved / incident closed) publish to a Pub/Sub
+topic whose push subscription hits ADK's trigger endpoint
+`POST /apps/{app}/trigger/pubsub`, exposed by
+`get_fast_api_app(trigger_sources=["pubsub"])` — each message runs exactly
+one release pass. Build the trigger app against the ADK ambient-agent
+sample and deploy it as a Cloud Run service; locally a cron or `/loop`
+calling `make release` stands in for the scheduler. The store-sourced
+queue makes the local single pass and the event-triggered form identical
+— only the trigger changes. The sprint orchestrator then only has to
+drive items to `status=queued`.
+
 ## 12. Tear down: stop the hourly bill after testing
 
 Both Cloud Run services run with min-instances=1 (the governed app for
