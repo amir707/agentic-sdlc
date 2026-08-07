@@ -28,6 +28,7 @@ def main() -> None:
 
     from adapters.adk.invoker import ADKInvoker
     from adapters.adk.executor import ADKPipelineExecutor
+    from adapters.adk.release_workflow import ADKReleaseExecutor
     from orchestrator.config import load_project
     from orchestrator.driver import build_context, run_pipeline
 
@@ -40,7 +41,8 @@ def main() -> None:
           flush=True)
     project = load_project(args.project)
     ctx = build_context(project, invoker=ADKInvoker(),
-                        executor=ADKPipelineExecutor())
+                        executor=ADKPipelineExecutor(),
+                        release_executor=ADKReleaseExecutor())
     try:
         asyncio.run(run_pipeline(ctx, parallel=args.parallel))
     except KeyboardInterrupt:

@@ -51,3 +51,18 @@ def test_no_in_process_recheck_loop_exists():
     assert not hasattr(driver, "run_release_loop")
     import inspect
     assert "asyncio.sleep" not in inspect.getsource(driver.run_release_pass)
+
+
+def test_release_pass_delegates_to_the_release_executor():
+    """The pass runs on the ReleaseExecutor port (its own ADK Workflow,
+    ADR-0007) — the driver holds the lock and delegates, nothing more."""
+    calls = []
+
+    class FakeExecutor:
+        async def run_pass(self, ctx):
+            calls.append("pass")
+
+    ctx = SimpleNamespace(release_lock=asyncio.Lock(),
+                          release_executor=FakeExecutor())
+    asyncio.run(driver.run_release_pass(ctx))
+    assert calls == ["pass"]
