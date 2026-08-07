@@ -271,6 +271,7 @@ async def state_json(request):
                 timespec="seconds"),
             "sprint": sprint,
             "items": db.list_backlog(conn),
+            "assessments": db.latest_assessments(conn),
             "audit": db.list_audit(conn)[-400:],
             "deploys": db.list_deploys(conn),
             "incidents": db.list_incidents(conn),

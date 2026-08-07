@@ -238,7 +238,7 @@ async def test_state_json_route_is_read_only_world_view(server):
         assert ok.status_code == 200
         state = ok.json()
     for key in ("project", "generated_at", "sprint", "items", "audit",
-                "deploys", "incidents", "token_usage_sprint",
+                "assessments", "deploys", "incidents", "token_usage_sprint",
                 "token_usage_all"):
         assert key in state, f"missing {key}"
     assert isinstance(state["items"], list) and state["items"]

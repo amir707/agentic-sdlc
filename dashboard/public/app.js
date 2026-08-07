@@ -47,6 +47,8 @@ let state = null;
 let prevStatuses = {};
 let tokenScope = "sprint";
 let tokenTable = false;
+let streamOpen = false;
+let lastStreamId = 0;
 
 /* ---------- helpers ---------- */
 
@@ -95,6 +97,8 @@ function render() {
   renderEnvs();
   renderIncidents();
   renderTokens();
+  renderAssessments();
+  if (streamOpen) streamAppendNew();
   prevStatuses = Object.fromEntries(state.items.map((i) => [i.id, i.status]));
 }
 
@@ -208,9 +212,11 @@ function renderTokens() {
   if (tokenTable) { host.innerHTML = tokenTableHtml(rows); return; }
 
   const max = Math.max(...rows.map((r) => r.input_tokens), 1);
-  const rowH = 46, barH = 11, labelW = 118, valueW = 64;
-  const width = 460, plotW = width - labelW - valueW;
-  const height = rows.length * rowH + 6;
+  /* Label line above, bars below — nothing shares horizontal space
+     with the (arbitrarily long) agent/model names. */
+  const rowH = 62, barH = 11, valueW = 70;
+  const width = 460, plotW = width - valueW;
+  const height = rows.length * rowH + 2;
   const x = (v) => (v / max) * plotW;
 
   /* bar: 4px rounded data-end, square baseline end */
@@ -225,18 +231,18 @@ function renderTokens() {
     aria-label="token usage per agent">`;
   svg += `<style>.b1{fill:var(--series-1)}.b2{fill:var(--series-2)}</style>`;
   rows.forEach((r, i) => {
-    const y = i * rowH + 4;
-    svg += `<text class="agent-label" x="0" y="${y + 12}">${esc(r.agent)}</text>`;
-    svg += `<text class="model-label" x="0" y="${y + 25}">${esc(r.model)}</text>`;
-    const g = `data-i="${i}"`;
-    svg += `<g class="tok-mark" ${g}>`;
-    svg += bar(labelW, y + 4, Math.max(x(r.input_tokens), 2), "b1");
+    const y = i * rowH + 2;
+    svg += `<text x="0" y="${y + 12}"><tspan class="agent-label">
+      ${esc(r.agent)}</tspan><tspan class="model-label" dx="7">
+      ${esc(r.model)}</tspan></text>`;
+    svg += `<g class="tok-mark" data-i="${i}">`;
+    svg += bar(0, y + 20, Math.max(x(r.input_tokens), 2), "b1");
     svg += `<text class="val-label"
-      x="${labelW + Math.max(x(r.input_tokens), 2) + 6}" y="${y + 13}">
+      x="${Math.max(x(r.input_tokens), 2) + 6}" y="${y + 29}">
       ${fmt(r.input_tokens)}</text>`;
-    svg += bar(labelW, y + 19, Math.max(x(r.output_tokens), 2), "b2");
+    svg += bar(0, y + 35, Math.max(x(r.output_tokens), 2), "b2");
     svg += `<text class="val-label"
-      x="${labelW + Math.max(x(r.output_tokens), 2) + 6}" y="${y + 28}">
+      x="${Math.max(x(r.output_tokens), 2) + 6}" y="${y + 44}">
       ${fmt(r.output_tokens)}</text>`;
     svg += `</g>`;
   });
@@ -265,6 +271,74 @@ function tokenTableHtml(rows) {
     <tbody>${tr}</tbody>
     <tfoot><tr><th>total</th><th></th><th>${fmt(ti)}</th>
     <th>${fmt(to)}</th><th></th></tr></tfoot></table>`;
+}
+
+/* ---------- backlog vs assessment ---------- */
+
+function renderAssessments() {
+  const byItem = Object.fromEntries(
+    (state.assessments || []).map((a) => [a.item_id, a]));
+  const rows = state.items.map((i) => {
+    const a = byItem[i.id];
+    const escalated = a && ["low", "medium", "high"].indexOf(a.risk) >
+                          ["low", "medium", "high"].indexOf(i.claimed_risk);
+    const assessed = a
+      ? `<span class="chip risk-${esc(a.risk)}">${esc(a.risk)}</span>
+         ${escalated ? "<span title='assessed above the claim'>⬆️</span>" : ""}
+         <span class="chip">effort ${esc(a.effort)}</span>
+         <span class="chip">~${fmt(a.token_estimate)} tok</span>
+         ${a.recommend_split ? "<span class='chip risk-high'>SPLIT</span>" : ""}`
+      : `<span class="chip">not assessed yet</span>`;
+    return `<tr>
+      <td><strong>${esc(i.id)}</strong></td>
+      <td class="ttl">${esc(i.title)}</td>
+      <td><span class="chip risk-${esc(i.claimed_risk)}">claimed ${esc(i.claimed_risk)}</span></td>
+      <td class="arr">→</td>
+      <td>${assessed}</td>
+    </tr>`;
+  }).join("");
+  $("assessments").innerHTML =
+    `<table class="assess-table"><tbody>${rows}</tbody></table>`;
+}
+
+/* ---------- live audit stream ---------- */
+
+function streamEntryLi(entry, fresh) {
+  const li = document.createElement("li");
+  if (fresh) li.className = "fresh";
+  li.innerHTML = `<span class="tld ${DECISION_DOT[entry.decision] || ""}"></span>
+    <div class="who">${esc(entry.actor)} · ${timeAgo(entry.ts)}</div>
+    <div class="what">${esc(entry.decision.replaceAll("_", " "))}</div>
+    <div class="detail">${esc(factorsLine(entry.factors || {}))}</div>`;
+  return li;
+}
+
+function streamOpenPanel() {
+  streamOpen = true;
+  $("stream").classList.remove("hidden");
+  $("stream-toggle").classList.add("active");
+  const list = $("stream-list");
+  list.innerHTML = "";
+  const tail = state.audit.slice(-60).reverse();
+  for (const entry of tail) list.appendChild(streamEntryLi(entry, false));
+  lastStreamId = state.audit.length
+    ? Math.max(...state.audit.map((e) => e.id)) : 0;
+}
+
+function streamClosePanel() {
+  streamOpen = false;
+  $("stream").classList.add("hidden");
+  $("stream-toggle").classList.remove("active");
+}
+
+function streamAppendNew() {
+  const fresh = state.audit.filter((e) => e.id > lastStreamId);
+  if (!fresh.length) return;
+  const list = $("stream-list");
+  for (const entry of fresh.slice().reverse())
+    list.prepend(streamEntryLi(entry, true));
+  while (list.children.length > 120) list.removeChild(list.lastChild);
+  lastStreamId = Math.max(...state.audit.map((e) => e.id));
 }
 
 /* ---------- drawers ---------- */
@@ -346,6 +420,9 @@ function hideTip() { $("tooltip").classList.add("hidden"); }
 
 /* ---------- wiring ---------- */
 
+$("stream-toggle").addEventListener("click", () =>
+  streamOpen ? streamClosePanel() : streamOpenPanel());
+$("stream-close").addEventListener("click", streamClosePanel);
 $("drawer-close").addEventListener("click", closeDrawer);
 $("scrim").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", (e) => {

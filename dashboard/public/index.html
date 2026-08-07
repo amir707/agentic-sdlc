@@ -17,6 +17,8 @@
     <div class="live">
       <span id="live-dot" class="dot"></span>
       <span id="live-text">connecting…</span>
+      <button id="stream-toggle" class="stream-btn" title="live audit stream"
+        aria-label="toggle live audit stream">📡 stream</button>
     </div>
   </header>
 
@@ -61,10 +63,26 @@
     </section>
   </div>
 
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Backlog vs assessment</h2>
+      <div class="panel-note">the PM's claimed risk vs the governor's judgment</div>
+    </div>
+    <div id="assessments"></div>
+  </section>
+
   <footer class="foot">
     read-only view over the delivery store · refreshed every 5s ·
     <span id="generated-at"></span>
   </footer>
+
+  <aside id="stream" class="stream hidden" aria-label="live audit stream">
+    <div class="drawer-head">
+      <h3>📡 Live audit stream</h3>
+      <button id="stream-close" aria-label="close">✕</button>
+    </div>
+    <div class="stream-body"><ul class="tl" id="stream-list"></ul></div>
+  </aside>
 
   <aside id="drawer" class="drawer hidden" aria-modal="true">
     <div class="drawer-head">
