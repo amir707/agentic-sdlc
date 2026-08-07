@@ -62,7 +62,7 @@ flowchart LR
 | Release manager | reasoning agent (Gemini) | weighs incidents, closures, confidence windows |
 | Synthetic monitor | deterministic prober | threshold check on a sliding window |
 | Incident resolver | deterministic tool | hysteresis rule; separate from detection by role |
-| Orchestrator | Python driver (planning + release) + ADK Workflow (per-item) | the per-item pipeline runs on ADK's graph engine; the driver owns planning, resume dispatch, and release (ADR-0003, ADR-0007) |
+| Orchestrator | Python driver (planning) + ADK Workflow (per-item) + store-sourced release loop | the per-item pipeline runs on ADK's graph engine; the driver owns planning and resume dispatch; release is an independent loop over `status=queued` in the store, runnable standalone (`python -m orchestrator.release`) (ADR-0003, ADR-0007) |
 
 ## The one MCP boundary
 

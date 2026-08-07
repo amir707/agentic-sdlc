@@ -34,7 +34,6 @@ class Recorder:
         self.project = SimpleNamespace(policy=self._policies.get)
         self.store = None
         self.repo_host = SimpleNamespace(post_comment=lambda *a, **k: None)
-        self.approved = []
         self.ci_lock = asyncio.Lock()
         self.board = SimpleNamespace(begin=lambda *a, **k: None,
                                      finish=lambda *a, **k: None)
@@ -115,7 +114,8 @@ def test_happy_path_reaches_queued(stubs):
     ctx = Recorder()
     outcome = _run(ctx)
     assert outcome.kind == "queued" and outcome.pr == 42
-    assert len(ctx.approved) == 1 and ctx.approved[0].pr == 42
+    # The store status IS the release queue now (Workstream B) — the node
+    # sets status=queued rather than appending to an in-memory list.
     assert ("PAY-1", "queued", 42) in ctx.statuses
 
 

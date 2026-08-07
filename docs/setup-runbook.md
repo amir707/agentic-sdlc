@@ -291,6 +291,28 @@ gcloud run jobs executions list --job orchestrator --region "$REGION"
 gcloud run jobs executions cancel <EXECUTION-NAME> --region "$REGION" --quiet
 ```
 
+## 13. Release as an independent loop (Workstream B)
+
+Release reads its queue from the STORE (`status=queued` PRs), not from a
+sprint process's memory, so it can run on its own. This is how a PR held
+for an open incident still merges once the incident clears — no sprint
+run required.
+
+```bash
+# one release pass over store state, then the bounded recheck loop:
+make release PROJECT=candidate-app
+# a single pass (no waiting), e.g. from a cron/webhook:
+make release PROJECT=candidate-app ONCE=1
+#   → python -m orchestrator.release --project <name> [--once]
+```
+
+Cloud successor: point a **Cloud Scheduler** job (the confidence-window
+timer) and a **GitHub webhook** (PR approved / incident closed) at a
+Pub/Sub topic, and have the release job run `--once` per message. The
+store-sourced queue makes the in-process loop and the event-triggered
+form identical; only the trigger changes. The sprint orchestrator then
+only has to drive items to `status=queued`.
+
 ## 12. Tear down: stop the hourly bill after testing
 
 Both Cloud Run services run with min-instances=1 (the governed app for
