@@ -39,6 +39,9 @@ def main() -> None:
     parser.add_argument("--parallel", type=int, default=1)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8789)
+    parser.add_argument("--heartbeat-minutes", type=float, default=5.0,
+                        help="self-wake interval until Scheduler/webhook "
+                             "are wired (0 disables)")
     args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -51,7 +54,6 @@ def main() -> None:
     # passes over the same items.
     os.environ.setdefault("ADK_TRIGGER_MAX_CONCURRENT", "1")
 
-    import uvicorn
     from google.adk.cli.fast_api import get_fast_api_app
 
     app = get_fast_api_app(
@@ -62,7 +64,10 @@ def main() -> None:
     print(f"[sprint-service] {args.project}: awake on "
           f"http://{args.host}:{args.port} — one resume pass per event "
           "(POST /apps/sprint/trigger/pubsub)", flush=True)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    from orchestrator.heartbeat import serve_with_heartbeat
+    serve_with_heartbeat(app, args.host, args.port,
+                         "/apps/sprint/trigger/pubsub",
+                         args.heartbeat_minutes, "sprint")
 
 
 if __name__ == "__main__":
