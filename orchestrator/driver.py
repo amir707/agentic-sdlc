@@ -779,7 +779,8 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     return None
 
 
-async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
+async def run_pipeline(ctx: RunContext, parallel: int = 1,
+                       deprovision: bool = True) -> None:
     # Stale-incident hygiene: if a previous run left an incident open
     # and the service has since recovered, close it now (the resolver
     # also runs before every release pass).
@@ -847,8 +848,12 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1) -> None:
     # The engine cleans up after itself: the scratch checkout (and its
     # worktrees) are deleted on a CLEAN finish; a crashed run keeps
     # them so resume is instant. GitHub holds the truth either way.
-    from orchestrator import provisioning
-    provisioning.deprovision(ctx.project.name)
+    # The resident sprint service passes deprovision=False: it runs many
+    # passes per process, and re-cloning per event would waste the warm
+    # checkout (provision() heals it if anything is ever broken).
+    if deprovision:
+        from orchestrator import provisioning
+        provisioning.deprovision(ctx.project.name)
 
 
 # The explicit binding: definition step name -> handler.

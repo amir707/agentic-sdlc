@@ -230,3 +230,20 @@ def _wrap(value):
     async def fn():
         return value
     return fn()
+
+
+def test_gate_env_zero_budget_gives_one_look_then_parks(stubs, monkeypatch):
+    """The resident sprint service sets GATE_WAIT_MINUTES=0: an event
+    pass gives the gate exactly one look (inside the gate node) and
+    parks — never sleeps, never prompts, regardless of gate_mode."""
+    looks = {"n": 0}
+
+    async def never_decides(*a, **k):
+        looks["n"] += 1
+        return None
+    monkeypatch.setattr(wf, "check_decision", never_decides)
+    monkeypatch.setenv("GATE_WAIT_MINUTES", "0")
+    ctx = Recorder(gate="nudge")  # even nudge mode must not touch stdin
+    outcome = _run(ctx)
+    assert outcome.kind == "awaiting" and outcome.pr == 42
+    assert looks["n"] == 1
