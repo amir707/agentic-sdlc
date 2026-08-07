@@ -75,8 +75,22 @@ class Workspace:
         return self._git("rev-parse", "HEAD")
 
     def push(self, branch: str, remote_url: str) -> None:
-        """Push via a one-shot authenticated URL (never stored in config)."""
-        self._git("push", remote_url, f"HEAD:refs/heads/{branch}", "--force")
+        """Push via a one-shot authenticated URL (never stored in config).
+        A failure is re-raised with the URL redacted and the original
+        exception dropped — the token rides in the URL, and
+        CalledProcessError would echo it into tracebacks."""
+        from orchestrator.provisioning import redact_url
+
+        failure: tuple[int, str] | None = None
+        try:
+            self._git("push", remote_url, f"HEAD:refs/heads/{branch}",
+                      "--force")
+        except subprocess.CalledProcessError as exc:
+            failure = (exc.returncode, redact_url((exc.stderr or "").strip()))
+        if failure:
+            raise RuntimeError(
+                f"git push of {branch!r} to {redact_url(remote_url)} failed "
+                f"(exit {failure[0]}): {failure[1]}")
 
 
 class WorkspaceFactory:

@@ -22,6 +22,7 @@ removed with the checkout.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,13 @@ def checkout_path(project_name: str) -> Path:
     return scratch_root() / project_name / "checkout"
 
 
+def redact_url(url: str) -> str:
+    """Strip embedded credentials from a git URL for any human-facing
+    text. Tokens ride in clone/push URLs by design (transient, never in
+    config) — so no error, log, or traceback may echo the URL raw."""
+    return re.sub(r"//[^@/]+@", "//<redacted>@", url)
+
+
 def provision(project_name: str, clone_url: str) -> Workspace:
     """Materialize (or heal) the working checkout; idempotent."""
     target = checkout_path(project_name)
@@ -59,8 +67,22 @@ def provision(project_name: str, clone_url: str) -> Workspace:
             shutil.rmtree(target)  # husk without .git (e.g. orphaned)
         target.parent.mkdir(parents=True, exist_ok=True)
         _log(f"cloning {project_name} -> {target}")
-        subprocess.run(["git", "clone", "-q", clone_url, str(target)],
-                       check=True, capture_output=True, text=True)
+        # The original CalledProcessError carries the tokenized URL in
+        # its args (and git may echo it in stderr): capture the facts,
+        # DROP the exception object entirely, and raise clean outside
+        # the except block so no __context__ chains the token along.
+        failure: tuple[int, str] | None = None
+        try:
+            subprocess.run(["git", "clone", "-q", clone_url, str(target)],
+                           check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            failure = (exc.returncode, redact_url((exc.stderr or "").strip()))
+        if failure:
+            raise RuntimeError(
+                f"git clone failed for {redact_url(clone_url)} "
+                f"(exit {failure[0]}): {failure[1]} — for a private repo "
+                "this usually means the project .env's GITHUB_TOKEN does "
+                "not list this repository in its fine-grained access")
     _ensure_venv(target)
     return Workspace(target)
 
