@@ -37,7 +37,7 @@ from orchestrator.executor import PipelineExecutor, ReleaseExecutor
 from orchestrator.json_util import extract_json
 from orchestrator import schemas
 from orchestrator.rejection import Rejection, reject
-from adapters.repo_host import GitHubRepoHost
+from adapters.repo_host import GitHubRepoHost, RepoHostError
 from adapters.store_client import DeliveryStore
 from orchestrator.workspace import Workspace, WorkspaceFactory
 from adapters import deploy
@@ -453,7 +453,29 @@ async def decide_release_pr(ctx: RunContext, item: dict,
     release manager, then merge or hold. Returns the outcome
     ("merged" | "held" | "escalated" | "failed"). Called per PR by the
     release Workflow's node — the release-manager agent stays behind the
-    AgentInvoker port (ADR-0007), exactly as the coder/reviewer do."""
+    AgentInvoker port (ADR-0007), exactly as the coder/reviewer do.
+
+    Degrade, don't die: a repo-host failure on THIS PR (e.g. the store
+    says queued but the PR does not exist — store/GitHub disagree after
+    a repo reset) escalates this one item; it never aborts the pass, so
+    the rest of the queue still gets its decisions."""
+    try:
+        return await _decide_release_pr(ctx, item, confidence)
+    except RepoHostError as exc:
+        await ctx.audit("release_guard", "escalate_to_human", {
+            "pr": item["pr"], "item": item["id"],
+            "rule": "repo host error while releasing this PR — the store "
+                    "and the repo may disagree (reset-item to replay, or "
+                    "reseed if the repo was recreated)",
+            "error": str(exc)[:200]})
+        await ctx.set_status(item["id"], "escalated", item["pr"])
+        print(f"[release] BLOCKED PR #{item['pr']}: repo host error — "
+              f"escalated ({str(exc)[:80]})", flush=True)
+        return "escalated"
+
+
+async def _decide_release_pr(ctx: RunContext, item: dict,
+                             confidence: float) -> str:
     pr = item["pr"]
     # Recompute `verified` from the CURRENT head — no VerifyResult is
     # carried from the sprint run (stateless release). verify_once is
