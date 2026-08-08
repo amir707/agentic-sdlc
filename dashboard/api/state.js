@@ -6,6 +6,11 @@
 //   DELIVERY_STORE_URL  e.g. https://delivery-store-….run.app/mcp (or base)
 //   MCP_TOKEN_MONITOR   the store's monitor role token
 //   GITHUB_REPO         optional, e.g. amir707/candidate-app-2 (PR links)
+//
+// NOTE: a store deployed behind Cloud Run IAM (--no-allow-unauthenticated,
+// runbook §9.4) is NOT reachable from Vercel — this function has no
+// Google identity. Either keep a public store for the showcase
+// dashboard, or host the dashboard on Cloud Run behind the same SA.
 
 export default async function handler(req, res) {
   const raw = process.env.DELIVERY_STORE_URL;
@@ -18,7 +23,7 @@ export default async function handler(req, res) {
   const base = raw.replace(/\/mcp\/?$/, "");
   try {
     const upstream = await fetch(`${base}/state`, {
-      headers: { Authorization: `Bearer ${process.env.MCP_TOKEN_MONITOR}` },
+      headers: { "X-Store-Token": process.env.MCP_TOKEN_MONITOR },
     });
     if (!upstream.ok) {
       res.status(upstream.status).json({ error: `store ${upstream.status}` });

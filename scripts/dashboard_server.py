@@ -56,7 +56,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         token = os.environ.get("MCP_TOKEN_MONITOR", "")
         request = urllib.request.Request(
             f"{_store_base()}/state",
-            headers={"Authorization": f"Bearer {token}"})
+            headers={"X-Store-Token": token})
         try:
             with urllib.request.urlopen(request, timeout=10) as resp:
                 state = json.load(resp)
