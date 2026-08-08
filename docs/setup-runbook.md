@@ -131,10 +131,13 @@ vs cloud, per category): README, "Running it".
 ## 7. Cloud rung: delivery store + orchestrator on Cloud Run
 
 One image, two roles (see Dockerfile). Demo-scale choices, stated
-honestly: container-disk SQLite behind min=max=1 instance (Cloud SQL is
-the successor), public store URL guarded by the same per-role bearer
-tokens (IAM ID tokens are the successor), gate polling inside the job
-(GitHub webhook -> job execution is the successor).
+honestly: SQLite restored/replicated via **Litestream -> GCS** so the
+store runs SERVERLESS at min-instances=0 (~$0 idle; Firestore behind
+the same tool surface is the production successor — the mechanical
+recipe is tests/test_store_backend_contract.py), public store URL
+guarded by the same per-role bearer tokens (IAM ID tokens are the
+successor), gate polling inside the job (GitHub webhook -> job
+execution is the successor). Single writer: keep max-instances=1.
 
 ```bash
 PROJECT_ID=$(gcloud config get-value project)
@@ -176,12 +179,19 @@ for s in ANTHROPIC_API_KEY GOOGLE_API_KEY GITHUB_TOKEN CONFIG_TOKEN \
     --role=roles/secretmanager.secretAccessor
 done
 
-# 9.4 the delivery store (Cloud Run service, single instance)
+# 9.4a one-time: the Litestream replica bucket (the durable truth —
+# survives every teardown; deleting the SERVICE no longer loses data)
+gsutil mb -l "$REGION" -p "$PROJECT_ID" "gs://$PROJECT_ID-store-replica"
+gsutil iam ch "serviceAccount:$SA_EMAIL:roles/storage.objectAdmin" \
+  "gs://$PROJECT_ID-store-replica"
+
+# 9.4 the delivery store — SERVERLESS: min-instances=0, ~$0 idle; boot
+# restores from GCS, writes replicate continuously (store_entrypoint.sh)
 gcloud run deploy delivery-store --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
-  --allow-unauthenticated --min-instances=1 --max-instances=1 \
-  --no-cpu-throttling --memory=512Mi \
-  --set-env-vars=DELIVERY_STORE_HOST=0.0.0.0,PROJECT=candidate-app \
+  --allow-unauthenticated --min-instances=0 --max-instances=1 \
+  --memory=512Mi \
+  --set-env-vars=DELIVERY_STORE_HOST=0.0.0.0,PROJECT=candidate-app,LITESTREAM_REPLICA_URL=gcs://$PROJECT_ID-store-replica/candidate-app \
   --set-secrets=MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_MONITOR=MCP_TOKEN_MONITOR:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 STORE_URL="$(gcloud run services describe delivery-store \
   --region "$REGION" --format='value(status.url)')/mcp"
@@ -207,13 +217,50 @@ DELIVERY_STORE_URL="$STORE_URL" make watch   # curls the store's /status
 gcloud builds submit --tag "$IMAGE" . && \
   gcloud run jobs update orchestrator --image "$IMAGE" --region "$REGION" && \
   gcloud run services update delivery-store --image "$IMAGE" --region "$REGION"
+
+# 9.8 running a DIFFERENT project bundle (example: candidate-app-2).
+# Everything above is parameterized for candidate-app; a second bundle
+# differs only in its secrets and identifiers. Locally the code loads
+# projects-config/$NAME/.env; in the cloud that file never ships
+# (.dockerignore), so the same variable names must arrive via
+# Secret Manager (secret values) and --set-env-vars (non-secret values).
+NAME=candidate-app-2
+SUF=$(printf '%s' "$NAME" | tr 'a-z-' 'A-Z_')   # -> CANDIDATE_APP_2
+
+# (i) the bundle's non-secret files (project.yaml, backlog) must be
+#     COMMITTED — the image only contains what is in git; .env stays
+#     local as always.
+# (ii) project-scoped secrets under per-project names (the PAT is a
+#      fine-grained token scoped to THIS repo — never reuse another
+#      project's):
+for s in GITHUB_TOKEN CONFIG_TOKEN; do
+  printf '%s' "$(grep "^$s=" "projects-config/$NAME/.env" | cut -d= -f2-)" \
+    | gcloud secrets create "${s}_${SUF}" --data-file=-
+  gcloud secrets add-iam-policy-binding "${s}_${SUF}" \
+    --member="serviceAccount:$SA_EMAIL" \
+    --role=roles/secretmanager.secretAccessor
+done
+
+# (iii) the store serves one project at a time: point PROJECT and the
+#       replica path at the bundle (a fresh replica path = fresh world)
+gcloud run services update delivery-store --region "$REGION" \
+  --update-env-vars=PROJECT=$NAME,LITESTREAM_REPLICA_URL=gcs://$PROJECT_ID-store-replica/$NAME
+
+# (iv) the orchestrator job: bundle id in --args, the bundle's
+#      NON-secret .env values (GCP_PROJECT, GCP_REGION,
+#      CLOUD_RUN_SERVICE) as env vars, per-project secrets mapped back
+#      to the standard variable names
+gcloud run jobs update orchestrator --region "$REGION" \
+  --args=-m,orchestrator,--project,$NAME,--parallel,2 \
+  --update-env-vars="CLOUD_RUN_SERVICE=$(grep '^CLOUD_RUN_SERVICE=' "projects-config/$NAME/.env" | cut -d= -f2-),GCP_PROJECT=$(grep '^GCP_PROJECT=' "projects-config/$NAME/.env" | cut -d= -f2-),GCP_REGION=$(grep '^GCP_REGION=' "projects-config/$NAME/.env" | cut -d= -f2-)" \
+  --update-secrets=GITHUB_TOKEN=GITHUB_TOKEN_${SUF}:latest,CONFIG_TOKEN=CONFIG_TOKEN_${SUF}:latest
 ```
 
 Caveats at this rung: cloud `make watch` lacks the live NOW-worker
 timers (the activity board is on the job's disk) and `make verify-demo`
-still reads local SQLite. A store instance recycle — including
-`gcloud run services update` — loses the world (reseed + rerun); set
-TZ=Australia/Sydney on the service for local-time reports.
+still reads local SQLite. Set TZ=Australia/Sydney on the service for
+local-time reports. (The old "instance recycle loses the world" caveat
+is retired: the store restores from its Litestream replica on boot.)
 
 ## 8. Field notes: hiccups from the first cloud deployment
 
