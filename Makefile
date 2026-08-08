@@ -113,7 +113,7 @@ try-setup:
 	  else rm -rf projects-config/$(NAME) && echo "deleted (preview only)"; fi
 
 # Delivery dashboard: kanban sprint board + environments + token usage,
-# served locally against this project's store (Vercel deploy: runbook).
+# served locally against this project's store (runbook §14).
 dashboard:
 	$(require_project)
 	$(PYTHON) scripts/dashboard_server.py --project $(PROJECT)

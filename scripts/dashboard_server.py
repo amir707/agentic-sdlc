@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Local dashboard server: serves dashboard/public and proxies
 /api/state to the delivery store, holding the monitor token server-side
-— the exact contract of dashboard/api/state.js on Vercel, so the SAME
-static assets run in both places and the token never reaches a browser.
+so it never reaches a browser. The static assets are host-agnostic —
+anything that serves dashboard/public plus this /api/state contract
+(store /state passthrough + optional repo field) can host them.
 
 Usage: make dashboard PROJECT=<name>   (default port 8790)
 """
