@@ -248,6 +248,16 @@ def record_deploy(conn, pr: int, revision: str, traffic: str,
     conn.commit()
 
 
+def list_deploys(conn) -> list[dict]:
+    """Full deploy history, oldest first (dashboard read)."""
+    return _rows(conn.execute("SELECT * FROM deploys ORDER BY id"))
+
+
+def list_incidents(conn) -> list[dict]:
+    """Full incident history, oldest first (dashboard read)."""
+    return _rows(conn.execute("SELECT * FROM incidents ORDER BY id"))
+
+
 def list_recent_deploys(conn, window_minutes: int) -> list[dict]:
     cutoff = (datetime.now(timezone.utc)
               - timedelta(minutes=window_minutes)).isoformat(timespec="seconds")

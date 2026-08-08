@@ -219,3 +219,27 @@ async def test_item_lifecycle_is_store_owned(server):
     result = await _call("monitor", "set_item_status",
                          {"item_id": "PAY-101", "status": "pending"})
     assert result.isError
+
+
+@pytest.mark.anyio
+async def test_state_json_route_is_read_only_world_view(server):
+    """/state serves the dashboard's world as JSON — bearer-gated like
+    every route, and NOT an MCP tool (the tool surface is unchanged)."""
+    import httpx
+
+    base = URL.removesuffix("/mcp")
+    async with httpx.AsyncClient() as client:
+        no_token = await client.get(f"{base}/state")
+        assert no_token.status_code == 401
+
+        ok = await client.get(
+            f"{base}/state",
+            headers={"Authorization": f"Bearer {TOKENS['monitor']}"})
+        assert ok.status_code == 200
+        state = ok.json()
+    for key in ("project", "generated_at", "sprint", "items", "audit",
+                "assessments", "deploys", "incidents", "token_usage_sprint",
+                "token_usage_all"):
+        assert key in state, f"missing {key}"
+    assert isinstance(state["items"], list) and state["items"]
+    assert {i["id"] for i in state["items"]} >= {"PAY-101", "CAT-201"}
