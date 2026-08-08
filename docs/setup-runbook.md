@@ -134,9 +134,9 @@ One image, two roles (see Dockerfile). Demo-scale choices, stated
 honestly: SQLite restored/replicated via **Litestream -> GCS** so the
 store runs SERVERLESS at min-instances=0 (~$0 idle; Firestore behind
 the same tool surface is the production successor — the mechanical
-recipe is tests/test_store_backend_contract.py), public store URL
-guarded by the same per-role bearer tokens (IAM ID tokens are the
-successor), gate polling inside the job (GitHub webhook -> job
+recipe is tests/test_store_backend_contract.py), store behind Cloud
+Run IAM (--no-allow-unauthenticated; role tokens do role scoping in
+X-Store-Token), gate polling inside the job (GitHub webhook -> job
 execution is the successor). Single writer: keep max-instances=1.
 
 ```bash
@@ -225,13 +225,12 @@ gcloud beta run jobs logs tail orchestrator --region "$REGION"
 # tools reach the store through gcloud's proxy, which attaches YOUR
 # identity token (you were granted run.invoker in 9.4); the role token
 # still travels in X-Store-Token untouched.
-gcloud run services proxy delivery-store --region "$REGION" --port 8790 &
-DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make monitor
-DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make watch
-DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make dashboard
-# NOTE: the Vercel-hosted dashboard cannot reach an IAM-protected store
-# (no Google identity on Vercel) — the showcase either uses a public
-# store or the dashboard moves to Cloud Run behind the same SA.
+gcloud run services proxy delivery-store --region "$REGION" --port 8791 &
+DELIVERY_STORE_URL="http://127.0.0.1:8791/mcp" make monitor
+DELIVERY_STORE_URL="http://127.0.0.1:8791/mcp" make watch
+DELIVERY_STORE_URL="http://127.0.0.1:8791/mcp" make dashboard
+# (the dashboard reaches an IAM-protected store the same way — through
+# this proxy; see §14)
 
 # image update after code changes
 gcloud builds submit --tag "$IMAGE" . && \
@@ -459,33 +458,26 @@ and bucket. Leave the deploy service account and the project itself in
 place unless you are done with the project entirely. Step 1 alone is
 enough to stop the bleed while keeping the service redeployable.
 
-## 14. Delivery dashboard (local + Vercel)
+## 14. Delivery dashboard
 
-A read-only web dashboard over the store's new `/state` JSON route:
-kanban sprint board (click a ticket for its audit history), preprod/prod
+A read-only web dashboard over the store's `/state` JSON route: kanban
+sprint board (click a ticket for its audit history), preprod/prod
 environment cards (click for deploy history), token usage, incidents.
-The monitor bearer token stays SERVER-side in a tiny proxy — the browser
-never sees it. The same static assets serve both deployments.
+The monitor token stays SERVER-side in `scripts/dashboard_server.py` —
+the browser never sees it.
 
 ```bash
-# local (against this project's store; store must be running):
+# against this project's store (store must be running):
 make dashboard PROJECT=candidate-app-2     # http://127.0.0.1:8790
+
+# against an IAM-protected CLOUD store: through the proxy from 9.7
+DELIVERY_STORE_URL="http://127.0.0.1:8791/mcp" make dashboard
 ```
 
-Vercel deployment (points at the CLOUD delivery store — a Vercel
-function cannot reach your laptop):
-
-```bash
-npm i -g vercel && vercel login
-cd agentic-sdlc/dashboard
-vercel link                                # create/link the project
-vercel env add DELIVERY_STORE_URL production   # https://delivery-store-….run.app/mcp
-vercel env add MCP_TOKEN_MONITOR production    # the store's monitor token
-vercel env add GITHUB_REPO production          # e.g. amir707/candidate-app-2 (PR links)
-vercel --prod
-```
-
-The dashboard polls `/api/state` every 5s; `dashboard/api/state.js` is
-the Vercel proxy and `scripts/dashboard_server.py` the identical local
-one. One dashboard shows one project's world (one store per project);
-deploy a second Vercel project with different env values for another.
+The dashboard polls `/api/state` every 5s. One dashboard shows one
+project's world (one store per project). The static assets under
+`dashboard/public/` are host-agnostic: any host that serves them plus
+the `/api/state` proxy contract (store `/state` passthrough with the
+token held server-side, optional `repo` field for PR links) can carry
+the dashboard — a Cloud Run service behind the store's SA is the
+natural cloud home.
