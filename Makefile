@@ -89,7 +89,7 @@ demo:
 status:
 	$(require_project)
 	@if [ -n "$$DELIVERY_STORE_URL" ]; then \
-	  curl -fsS -H "Authorization: Bearer $$MCP_TOKEN_MONITOR" \
+	  curl -fsS -H "X-Store-Token: $$MCP_TOKEN_MONITOR" \
 	    "$${DELIVERY_STORE_URL%/mcp}/status"; \
 	else \
 	  $(PYTHON) scripts/store_status.py; \

@@ -9,9 +9,32 @@ the server.
 
 import json
 import os
+from urllib.parse import urlsplit
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
+
+
+def auth_headers(token: str, url: str) -> dict[str, str]:
+    """Headers for one store request.
+
+    The role token travels in X-Store-Token so the Authorization header
+    stays free for Cloud Run's IAM layer: with STORE_IAM_AUTH set (the
+    cloud job/services set it), a Google-signed identity token for the
+    store's origin is attached per request — tokens expire hourly, so
+    they are fetched here, not at client construction. Locally neither
+    branch fires and the server accepts X-Store-Token directly.
+    """
+    headers = {"X-Store-Token": token}
+    if os.environ.get("STORE_IAM_AUTH", "").lower() in ("1", "true", "yes"):
+        import google.auth.transport.requests
+        import google.oauth2.id_token
+        parts = urlsplit(url)
+        audience = f"{parts.scheme}://{parts.netloc}"
+        id_token = google.oauth2.id_token.fetch_id_token(
+            google.auth.transport.requests.Request(), audience)
+        headers["Authorization"] = f"Bearer {id_token}"
+    return headers
 
 
 class DeliveryStore:
@@ -21,7 +44,7 @@ class DeliveryStore:
         # default stays the local loopback rung.
         self.url = (url or os.environ.get("DELIVERY_STORE_URL")
                     or f"http://127.0.0.1:{port}/mcp")
-        self.headers = {"Authorization": f"Bearer {token}"}
+        self._token = token
 
     @classmethod
     def for_agents(cls) -> "DeliveryStore":
@@ -38,7 +61,8 @@ class DeliveryStore:
     async def call(self, tool: str, **args):
         """One tool call per connection: the server is stateless and the
         callers are episodic, so simplicity beats connection reuse."""
-        async with streamablehttp_client(self.url, headers=self.headers) as (r, w, _):
+        headers = auth_headers(self._token, self.url)
+        async with streamablehttp_client(self.url, headers=headers) as (r, w, _):
             async with ClientSession(r, w) as session:
                 await session.initialize()
                 result = await session.call_tool(tool, args)

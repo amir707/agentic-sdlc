@@ -186,22 +186,34 @@ gsutil iam ch "serviceAccount:$SA_EMAIL:roles/storage.objectAdmin" \
   "gs://$PROJECT_ID-store-replica"
 
 # 9.4 the delivery store — SERVERLESS: min-instances=0, ~$0 idle; boot
-# restores from GCS, writes replicate continuously (store_entrypoint.sh)
+# restores from GCS, writes replicate continuously (store_entrypoint.sh).
+# IAM is the perimeter (--no-allow-unauthenticated): only principals
+# with run.invoker reach the app at all; the role tokens then do role
+# SCOPING in X-Store-Token (Authorization carries the identity token).
 gcloud run deploy delivery-store --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
-  --allow-unauthenticated --min-instances=0 --max-instances=1 \
+  --no-allow-unauthenticated --min-instances=0 --max-instances=1 \
   --memory=512Mi \
   --set-env-vars=DELIVERY_STORE_HOST=0.0.0.0,PROJECT=candidate-app,LITESTREAM_REPLICA_URL=gcs://$PROJECT_ID-store-replica/candidate-app \
   --set-secrets=MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_MONITOR=MCP_TOKEN_MONITOR:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 STORE_URL="$(gcloud run services describe delivery-store \
   --region "$REGION" --format='value(status.url)')/mcp"
+# invokers: the orchestrator job's SA, and your own account for local
+# ops (monitor/watch/dashboard through the proxy in 9.7)
+gcloud run services add-iam-policy-binding delivery-store \
+  --region "$REGION" --member="serviceAccount:$SA_EMAIL" \
+  --role=roles/run.invoker
+gcloud run services add-iam-policy-binding delivery-store \
+  --region "$REGION" \
+  --member="user:$(gcloud config get-value account)" \
+  --role=roles/run.invoker
 
 # 9.5 the orchestrator (Cloud Run Job)
 gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
   --command=python --args=-m,orchestrator,--project,candidate-app,--parallel,2 \
   --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
-  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
+  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
   --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 
 # 9.6 run a sprint; approvals: comment /approve on the PR while the job
@@ -209,9 +221,17 @@ gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
 gcloud run jobs execute orchestrator --region "$REGION"
 gcloud beta run jobs logs tail orchestrator --region "$REGION"
 
-# 9.7 monitor and watch stay local, pointed at the cloud store
-DELIVERY_STORE_URL="$STORE_URL" make monitor
-DELIVERY_STORE_URL="$STORE_URL" make watch   # curls the store's /status
+# 9.7 monitor and watch stay local. With IAM as the perimeter, local
+# tools reach the store through gcloud's proxy, which attaches YOUR
+# identity token (you were granted run.invoker in 9.4); the role token
+# still travels in X-Store-Token untouched.
+gcloud run services proxy delivery-store --region "$REGION" --port 8790 &
+DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make monitor
+DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make watch
+DELIVERY_STORE_URL="http://127.0.0.1:8790/mcp" make dashboard
+# NOTE: the Vercel-hosted dashboard cannot reach an IAM-protected store
+# (no Google identity on Vercel) — the showcase either uses a public
+# store or the dashboard moves to Cloud Run behind the same SA.
 
 # image update after code changes
 gcloud builds submit --tag "$IMAGE" . && \

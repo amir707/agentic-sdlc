@@ -129,6 +129,19 @@ async def test_unknown_token_rejected_at_middleware(server):
 
 
 @pytest.mark.anyio
+async def test_x_store_token_is_the_primary_carrier(server):
+    """Role tokens travel in X-Store-Token (Authorization stays free
+    for Cloud Run IAM); a garbage Authorization must not shadow it."""
+    headers = {"X-Store-Token": TOKENS["agents"],
+               "Authorization": "Bearer google-identity-token-not-a-role"}
+    async with streamablehttp_client(URL, headers=headers) as (r, w, _):
+        async with ClientSession(r, w) as session:
+            await session.initialize()
+            result = await session.call_tool("list_backlog", {})
+    assert len(_payload(result)) == 6
+
+
+@pytest.mark.anyio
 async def test_incident_paths_are_role_scoped(server):
     # Agents must not open incidents...
     result = await _call("agents", "open_incident",

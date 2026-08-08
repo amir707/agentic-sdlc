@@ -25,6 +25,7 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 )
 from google.genai import types
 
+from adapters.store_client import auth_headers
 from orchestrator.invoker import AgentSpec, Invocation, StoreTools
 
 
@@ -36,11 +37,13 @@ def _materialize_tool(tool):
         port = os.environ.get("DELIVERY_STORE_PORT", "8787")
         url = (os.environ.get("DELIVERY_STORE_URL")
                or f"http://127.0.0.1:{port}/mcp")
+        # auth_headers puts the role token in X-Store-Token and, under
+        # STORE_IAM_AUTH, an identity token in Authorization (Cloud Run
+        # IAM). Fetched here = per invocation, well inside token expiry.
         return McpToolset(
             connection_params=StreamableHTTPConnectionParams(
                 url=url,
-                headers={"Authorization":
-                         f"Bearer {os.environ['MCP_TOKEN_AGENTS']}"},
+                headers=auth_headers(os.environ["MCP_TOKEN_AGENTS"], url),
             ),
             tool_filter=list(tool.tool_filter),
         )

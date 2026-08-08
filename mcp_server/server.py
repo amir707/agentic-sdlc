@@ -301,7 +301,13 @@ class BearerRoleMiddleware:
             return
         headers = {k.decode().lower(): v.decode()
                    for k, v in scope.get("headers", [])}
-        token = headers.get("authorization", "").removeprefix("Bearer ").strip()
+        # X-Store-Token is the primary carrier so Authorization stays
+        # free for Cloud Run IAM (--no-allow-unauthenticated puts a
+        # Google identity token there). Authorization: Bearer remains a
+        # fallback for local/direct callers.
+        token = (headers.get("x-store-token", "").strip()
+                 or headers.get("authorization", "")
+                    .removeprefix("Bearer ").strip())
         role = self.tokens.get(token)
         if role is None:
             response = JSONResponse({"error": "invalid bearer token"},
