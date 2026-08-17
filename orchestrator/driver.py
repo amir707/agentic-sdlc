@@ -29,14 +29,14 @@ from pathlib import Path
 from adapters import deploy
 from adapters.repo_host import RepoHostError
 from adapters.store_client import DeliveryStore
-from orchestrator import schemas
+from orchestrator import governance, schemas
 from orchestrator.context import RunContext, build_context  # noqa: F401 (re-exported for entry points)
 from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
                                            build_import_graph)
 from orchestrator.gate import Decision, check_decision, parse_command
 from orchestrator.json_util import extract_json
 from orchestrator.pr_markers import find_marker, marker
-from orchestrator.rejection import Rejection, reject
+from orchestrator.rejection import Rejection
 from orchestrator.workspace import WorkspaceFactory
 from tools.diff_analysis import files_touched
 from sdlc_steps import incident_resolver, preprod_ci, sprint_packer, verify as verify_step
@@ -279,12 +279,9 @@ async def verify_once(ctx: RunContext, item: dict,
 
 async def escalate_item(ctx: RunContext, item: dict, pr: int, actor: str,
                         rule: str) -> None:
-    """Hand one item to a human: audit the rule + set store status.
-    Shared by the ADK workflow nodes so every escalation path records
-    the same evidence the sequential driver used to."""
-    await ctx.audit(actor, "escalate_to_human", {"pr": pr, "rule": rule})
-    await ctx.set_status(item["id"], "escalated", pr)
-    print(f"[{item['id']}] escalated to human: {rule}", flush=True)
+    """Hand one item to a human (kept as the name the ADK workflow nodes
+    call; the mechanics live in orchestrator/governance.py)."""
+    await governance.escalate(ctx, item, pr, actor, rule)
 
 
 def review_already_approved(ctx: RunContext, pr: int) -> bool:
@@ -431,15 +428,11 @@ async def decide_release_pr(ctx: RunContext, item: dict,
     try:
         return await _decide_release_pr(ctx, item, confidence)
     except RepoHostError as exc:
-        await ctx.audit("release_guard", "escalate_to_human", {
-            "pr": item["pr"], "item": item["id"],
-            "rule": "repo host error while releasing this PR — the store "
-                    "and the repo may disagree (reset-item to replay, or "
-                    "reseed if the repo was recreated)",
-            "error": str(exc)[:200]})
-        await ctx.set_status(item["id"], "escalated", item["pr"])
-        print(f"[release] BLOCKED PR #{item['pr']}: repo host error — "
-              f"escalated ({str(exc)[:80]})", flush=True)
+        await governance.escalate(
+            ctx, item, item["pr"], "release_guard",
+            "repo host error while releasing this PR — the store and the "
+            "repo may disagree (reset-item to replay, or reseed if the "
+            "repo was recreated)", error=str(exc)[:200])
         return "escalated"
 
 
@@ -459,20 +452,14 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
     except UnparseableSource as broken:
         # No rework loop this late: post-approval commits are a human's to
         # answer for. Block the merge and escalate.
-        await ctx.audit("release_guard", "hold_merge", {
-            "pr": pr, "head_sha": head,
-            "rule": f"post-approval head does not parse: {broken}"})
-        await ctx.set_status(item["id"], "escalated", pr)
-        print(f"[release] BLOCKED PR #{pr}: head {head[:7]} does not parse "
-              "— escalated", flush=True)
+        await governance.escalate(
+            ctx, item, pr, "release_guard",
+            f"post-approval head does not parse: {broken}", head_sha=head)
         return "escalated"
     if verified.needs_flag:
-        await ctx.audit("release_guard", "hold_merge", {
-            "pr": pr, "head_sha": head,
-            "rule": "post-approval head violates the flag policy"})
-        await ctx.set_status(item["id"], "escalated", pr)
-        print(f"[release] BLOCKED PR #{pr}: head violates flag policy "
-              "— escalated", flush=True)
+        await governance.escalate(
+            ctx, item, pr, "release_guard",
+            "post-approval head violates the flag policy", head_sha=head)
         return "escalated"
     comments = ctx.repo_host.get_review_threads(pr)
     if find_marker(comments, marker("ci", head, "passed")) is None:
@@ -482,12 +469,9 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             ci_ok = await run_preprod_ci(ctx, item, pr, verified)
         ctx.board.finish(item["id"], "head re-verified + preprod deployed")
         if not ci_ok:
-            await ctx.audit("release_guard", "hold_merge", {
-                "pr": pr, "head_sha": head,
-                "rule": "preprod failed for the current head"})
-            await ctx.set_status(item["id"], "failed", pr)
-            print(f"[release] BLOCKED PR #{pr}: preprod failed for head "
-                  f"{head[:7]}", flush=True)
+            await governance.fail(ctx, item, pr, "release_guard",
+                                  "preprod failed for the current head",
+                                  head_sha=head)
             return "failed"
 
     print(f"[release] PR #{pr} verified: area={verified.primary_area} "
@@ -536,13 +520,10 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             # branch conflicts — flags.json is the usual magnet). Auto-rebase
             # is a documented successor, not built: the PR stays queued with
             # an audited reason for a human (rebase, or make reset-item).
-            await ctx.audit("release_guard", "hold_merge", {
-                "pr": pr,
-                "rule": "merge failed — branch likely conflicts with "
-                        "advanced main; rebase or reset-item",
-                "error": str(exc)[:200]})
-            print(f"[release] BLOCKED PR #{pr}: not mergeable "
-                  f"({str(exc)[:80]})", flush=True)
+            await governance.hold(
+                ctx, item, pr, "release_guard",
+                "merge failed — branch likely conflicts with advanced "
+                "main; rebase or reset-item", error=str(exc)[:200])
             return "held"
         try:
             deploy.promote(f"pr-{pr}")
@@ -552,15 +533,11 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             # (the branch is merged; re-verifying it is meaningless) —
             # a human completes the promote. Escalate with the facts,
             # never crash the pass.
-            await ctx.audit("release_guard", "escalate_to_human", {
-                "pr": pr, "item": item["id"],
-                "rule": "PR merged but the traffic shift failed — promote "
-                        f"tag pr-{pr} manually (adapters.deploy promote) "
-                        "and set the item released",
-                "error": str(exc)[:300]})
-            await ctx.set_status(item["id"], "escalated", pr)
-            print(f"[release] MERGED PR #{pr} but promote FAILED — "
-                  "escalated for a manual traffic shift", flush=True)
+            await governance.escalate(
+                ctx, item, pr, "release_guard",
+                "PR merged but the traffic shift failed — promote tag "
+                f"pr-{pr} manually (adapters.deploy promote) and set the "
+                "item released", error=str(exc)[:300])
             return "escalated"
         await ctx.store.call("record_deploy", pr=pr,
                              revision=f"pr-{pr}", traffic="100",
@@ -603,14 +580,11 @@ async def process_item(ctx: RunContext, item: dict) -> None:
     except RuntimeError as exc:
         if "runaway guard" not in str(exc):
             raise
-        await ctx.audit("orchestrator", "escalate_to_human", {
-            "item": item["id"],
-            "rule": "agent exceeded its step budget mid-item; a human "
-                    "reviews the PR state (reset-item to replay)",
-            "error": str(exc)[:120]})
-        await ctx.set_status(item["id"], "escalated")
-        ctx.board.finish(item["id"], "escalated (runaway agent)")
-        print(f"[{item['id']}] ESCALATED: {exc}", flush=True)
+        await governance.escalate(
+            ctx, item, None, "orchestrator",
+            "agent exceeded its step budget mid-item; a human reviews the "
+            "PR state (reset-item to replay)",
+            error=str(exc)[:120], note="escalated (runaway agent)")
         return None
 
 
@@ -640,12 +614,11 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
                   "skipping this run", flush=True)
             return None
         if override.kind == "reject":
-            await reject(ctx.store, ctx.repo_host,
-                         Rejection(pr, "human_declined", "backlog",
-                                   override.reason or "declined after "
-                                   "escalation"),
-                         actor="approval_gate")
-            await ctx.set_status(item["id"], "rejected")
+            await governance.bounce(
+                ctx, item,
+                Rejection(pr, "human_declined", "backlog",
+                          override.reason or "declined after escalation"),
+                actor="approval_gate")
             return None
         # /approve: the human overrules the escalation. Judgment is
         # theirs; the MACHINE checks are not — the release gate will
@@ -664,12 +637,10 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
             if not sys.stdin.isatty():
                 # Headless (Cloud Run Job): nobody can type a PR number.
                 # Escalate and move on; a later run resumes the item.
-                await ctx.audit("orchestrator", "escalate_to_human", {
-                    "item": item["id"],
-                    "rule": "human-implemented item needs an operator "
-                            "terminal — resume interactively"})
-                await ctx.set_status(item["id"], "escalated")
-                ctx.board.finish(item["id"], "escalated (headless run)")
+                await governance.escalate(
+                    ctx, item, None, "orchestrator",
+                    "human-implemented item needs an operator terminal — "
+                    "resume interactively", note="escalated (headless run)")
                 return None
             ctx.board.begin(item["id"], "await_human_pr", "team implements")
             raw = input(f"[human item] {item['id']} is human-implemented; "
@@ -700,15 +671,11 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     # parallel changes from main (it once "fixed" flags.json into
     # duplicate keys trying). A conflicted PR escalates immediately.
     if ctx.repo_host.get_pr(pr).get("mergeable") is False:
-        await ctx.audit("release_guard", "escalate_to_human", {
-            "pr": pr, "item": item["id"],
-            "rule": "merge conflict with main — human rebases (or "
-                    "make reset-item to replay)"})
-        await ctx.set_status(item["id"], "escalated")
-        ctx.board.finish(item["id"], "merge conflict — human")
-        print(f"[resume] {item['id']}: PR #{pr} conflicts with main — "
-              "escalated to a human (agents never resolve conflicts)",
-              flush=True)
+        await governance.escalate(
+            ctx, item, pr, "release_guard",
+            "merge conflict with main — human rebases (or make reset-item "
+            "to replay); agents never resolve conflicts",
+            note="merge conflict — human")
         return None
 
     if status == "queued":

@@ -27,7 +27,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
-from orchestrator import driver
+from orchestrator import driver, governance
 from orchestrator.gate import check_decision
 
 # Name-level edge table (source, target, route|None). Cycle edges carry
@@ -95,7 +95,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
     async def code_reviewer(node_input):
         from orchestrator.dependency_graph import UnparseableSource
-        from orchestrator.rejection import Rejection, reject
+        from orchestrator.rejection import Rejection
         # Resume idempotency: this head may already carry an approval (G5).
         if driver.review_already_approved(ctx, state["pr"]):
             return Event(output="already approved", route="approved")
@@ -111,7 +111,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                     f"no approval after {max_reviews} fix iterations")
                 return Event(output="unparseable, budget exhausted",
                              route="escalate")
-            await reject(ctx.store, ctx.repo_host,
+            await governance.bounce(ctx, item,
                          Rejection(state["pr"], "code_unparseable", "coder",
                                    f"the code does not parse: {broken}"),
                          actor="code_reviewer")
@@ -125,11 +125,10 @@ def build_item_workflow(ctx, item: dict, branch: str,
                              "iterations": state["review_rounds"] + 1})
             return Event(output=verdict.reasoning, route="approved")
         if verdict.verdict == "out_of_scope":
-            await reject(ctx.store, ctx.repo_host,
+            await governance.bounce(ctx, item,
                          Rejection(state["pr"], "out_of_scope", "author",
                                    verdict.reasoning),
                          actor="code_reviewer")
-            await ctx.set_status(item["id"], "rejected", state["pr"])
             return Event(output=verdict.reasoning, route="out_of_scope")
         if state["review_rounds"] >= max_reviews:
             await driver.escalate_item(
@@ -158,7 +157,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
     async def verify(node_input):
         from orchestrator.dependency_graph import UnparseableSource
-        from orchestrator.rejection import Rejection, reject
+        from orchestrator.rejection import Rejection
         try:
             result = await driver.verify_once(ctx, item, state["pr"])
         except UnparseableSource as broken:
@@ -170,7 +169,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                     f"code still unparseable after {max_flag_fixes} fix")
                 return Event(output="unparseable, budget exhausted",
                              route="escalate")
-            await reject(ctx.store, ctx.repo_host,
+            await governance.bounce(ctx, item,
                          Rejection(state["pr"], "code_unparseable", "coder",
                                    f"the code does not parse: {broken}"),
                          actor="verify")
@@ -188,7 +187,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                 f"flag still missing after {max_flag_fixes} fix")
             return Event(output="flag budget exhausted", route="escalate")
         state["flag_fixes"] += 1
-        await reject(ctx.store, ctx.repo_host,
+        await governance.bounce(ctx, item,
                      Rejection(state["pr"], "policy_flag_required", "coder",
                                f"verified risk {result.verified_risk} "
                                "requires a feature flag; none gates the new "
@@ -237,12 +236,11 @@ def build_item_workflow(ctx, item: dict, branch: str,
             yield Event(output=True, route="approve")
             return
         if decision and decision.kind == "reject":
-            from orchestrator.rejection import Rejection, reject
-            await reject(ctx.store, ctx.repo_host,
+            from orchestrator.rejection import Rejection
+            await governance.bounce(ctx, item,
                          Rejection(state["pr"], "human_declined", "backlog",
                                    decision.reason or "no reason given"),
                          actor="approval_gate")
-            await ctx.set_status(item["id"], "rejected", state["pr"])
             yield Event(output=False, route="reject")
             return
         if decision:  # hold: advance the baseline past it, keep waiting

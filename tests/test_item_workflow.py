@@ -86,9 +86,10 @@ def stubs(monkeypatch):
                         _async_return(SimpleNamespace(
                             kind="approve", author="amir707", reason="",
                             comment_index=0)))
-    # reject is imported inside nodes from orchestrator.rejection
-    import orchestrator.rejection as rej
-    monkeypatch.setattr(rej, "reject", _async_noop())
+    # bounces go through orchestrator.governance, which binds reject at
+    # import time — patch the name governance actually calls
+    import orchestrator.governance as gov
+    monkeypatch.setattr(gov, "reject", _async_noop())
     return calls
 
 
