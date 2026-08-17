@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import driver
+from orchestrator import release_flow
 from adapters.adk import release_workflow as rwf
 from adapters.adk.release_workflow import ADKReleaseExecutor
 
@@ -39,13 +39,13 @@ def stubs(monkeypatch):
 
     async def release_queue(ctx):
         return ctx._queue
-    monkeypatch.setattr(driver, "release_queue", release_queue)
+    monkeypatch.setattr(release_flow, "release_queue", release_queue)
 
     async def decide(ctx, item, confidence):
         assert confidence == 10  # policy reaches the decision node
         ctx.decided.append(item["pr"])
         return "merged"
-    monkeypatch.setattr(driver, "decide_release_pr", decide)
+    monkeypatch.setattr(release_flow, "decide_release_pr", decide)
 
 
 def _run(ctx):
@@ -73,7 +73,7 @@ def test_held_and_escalated_do_not_stop_the_walk(stubs, monkeypatch):
     async def decide(ctx, item, confidence):
         ctx.decided.append(item["pr"])
         return next(outcomes)
-    monkeypatch.setattr(driver, "decide_release_pr", decide)
+    monkeypatch.setattr(release_flow, "decide_release_pr", decide)
     ctx = Recorder([{"id": "A", "pr": 1}, {"id": "B", "pr": 2},
                     {"id": "C", "pr": 3}])
     _run(ctx)
@@ -90,7 +90,7 @@ def test_incident_hygiene_runs_before_any_decision(stubs, monkeypatch):
     async def decide(ctx, item, confidence):
         order.append(f"pr{item['pr']}")
         return "merged"
-    monkeypatch.setattr(driver, "decide_release_pr", decide)
+    monkeypatch.setattr(release_flow, "decide_release_pr", decide)
     ctx = Recorder([{"id": "A", "pr": 1}])
     _run(ctx)
     assert order == ["resolver", "pr1"]  # stale incidents never hold a merge

@@ -17,7 +17,7 @@ import os
 from adapters.adk.invoker import ADKInvoker
 from adapters.adk.release_workflow import build_release_workflow
 from orchestrator.config import load_project
-from orchestrator.driver import build_context
+from orchestrator.context import build_context
 
 _project = load_project(os.environ["PROJECT"])
 # Provisions the working checkout at startup (clone + venv) — a resident

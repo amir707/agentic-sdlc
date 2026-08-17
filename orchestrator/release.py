@@ -35,7 +35,8 @@ def main() -> None:
     from adapters.adk.invoker import ADKInvoker
     from adapters.adk.release_workflow import ADKReleaseExecutor
     from orchestrator.config import load_project
-    from orchestrator.driver import build_context, run_release_pass
+    from orchestrator.context import build_context
+    from orchestrator.release_flow import run_release_pass
 
     project = load_project(args.project)
     ctx = build_context(project, invoker=ADKInvoker(),

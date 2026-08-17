@@ -14,14 +14,14 @@ duplicate and spurious events are harmless.
 
 from google.adk.workflow import Workflow
 
-from orchestrator import driver
+from orchestrator import sprint
 
 
 def build_sprint_workflow(ctx, parallel: int = 1) -> Workflow:
     async def resume_pass(node_input):
         # deprovision=False: a resident service keeps the warm checkout
         # across events (provision() heals it if it ever breaks).
-        await driver.run_pipeline(ctx, parallel=parallel, deprovision=False)
+        await sprint.run_pipeline(ctx, parallel=parallel, deprovision=False)
         return {"outcome": "pass_complete"}
 
     resume_pass.__name__ = "resume_pass"

@@ -30,7 +30,8 @@ def main() -> None:
     from adapters.adk.executor import ADKPipelineExecutor
     from adapters.adk.release_workflow import ADKReleaseExecutor
     from orchestrator.config import load_project
-    from orchestrator.driver import build_context, run_pipeline
+    from orchestrator.context import build_context
+    from orchestrator.sprint import run_pipeline
 
     # Composition root: the ONLY place a framework is chosen (ADR-0007).
     import os

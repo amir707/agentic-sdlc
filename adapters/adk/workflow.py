@@ -19,7 +19,7 @@ decision; neither impersonates the other.
 
 Governance boundary (G3): lifecycle status lives in the STORE and is set
 at each transition here; terminal nodes return a small JSON outcome the
-executor maps back to the driver, which owns the release pass. ADK owns
+executor maps back to sprint.py, which hands off to the release flow. ADK owns
 execution-cursor state only.
 """
 
@@ -208,7 +208,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
     async def preprod_ci(node_input):
         # Concurrent preprod deploys against ONE Cloud Run service fight
         # over revision creation; serialize them even when coders run in
-        # parallel (same guard the sequential driver held).
+        # parallel (same guard the sequential loop held).
         async with ctx.ci_lock:
             ok = await steps.run_preprod_ci(ctx, item, state["pr"],
                                              state["verified"])

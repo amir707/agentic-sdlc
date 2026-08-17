@@ -49,7 +49,7 @@ structural guarantees in
 | Folder | What lives there |
 |---|---|
 | `sdlc_steps/` | **one folder per worker** — everything a worker *is*: its knowledge (`prompts.md`, `policy.yaml`) and its code. Root `policy.yaml` holds shared keys |
-| `orchestrator/` | the process runtime: `definition.py` (the pipeline as data), `driver.py` (the executor), and mechanics (config overlays, invoker port, git workspace, gate, rejection, dependency graph) |
+| `orchestrator/` | the process runtime: `definition.py` (the pipeline as data); `planning.py` / `steps.py` / `sprint.py` / `release_flow.py` (assess+pack, the per-item handlers the ADK nodes call, resume dispatch + run loop, the release decision); `governance.py` (the one way an item is escalated/failed/held/bounced); `context.py`; and mechanics (config overlays, invoker + executor ports, git workspace, gate, rejection, dependency graph). `driver.py` is the thin façade binding definition steps to handlers |
 | `projects-config/` | **one folder per governed project**: `project.yaml` (repo, areas, smoke endpoints), `backlog.json`, `.env` (gitignored), and `sdlc_steps/<step>/` overlays mirroring the root hierarchy |
 | `adapters/` | boundary adapters: GitHub REST (`repo_host`), MCP store client, Cloud Run deployer — plus `adapters/adk/`, the ONE package that speaks ADK |
 | `mcp_server/` | the delivery-store MCP server — the single source of truth |
