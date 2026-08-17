@@ -147,7 +147,7 @@ def test_stage_markers_key_on_head_sha():
     """Bot comments carry invisible idempotency markers keyed to the
     head SHA: a restart skips completed stages; a new commit repeats
     them (the SHA changed)."""
-    from orchestrator.driver import _find_marker, _marker
+    from orchestrator.pr_markers import find_marker as _find_marker, marker as _marker
 
     sha_a, sha_b = "abc123", "def456"
     comments = [
