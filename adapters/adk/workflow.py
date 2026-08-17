@@ -27,7 +27,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
-from orchestrator import driver, governance
+from orchestrator import governance, steps
 from orchestrator.gate import check_decision
 
 # Name-level edge table (source, target, route|None). Cycle edges carry
@@ -83,8 +83,8 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
     async def coder(node_input):
         if state["pr"] is None:                      # fresh item
-            await driver.run_coder(ctx, item, branch)
-            state["pr"] = await driver.open_pr(ctx, item, branch)
+            await steps.run_coder(ctx, item, branch)
+            state["pr"] = await steps.open_pr(ctx, item, branch)
             await ctx.set_status(item["id"], "in_review", state["pr"])
         return Event(output=state["pr"])
 
@@ -97,16 +97,16 @@ def build_item_workflow(ctx, item: dict, branch: str,
         from orchestrator.dependency_graph import UnparseableSource
         from orchestrator.rejection import Rejection
         # Resume idempotency: this head may already carry an approval (G5).
-        if driver.review_already_approved(ctx, state["pr"]):
+        if steps.review_already_approved(ctx, state["pr"]):
             return Event(output="already approved", route="approved")
         try:
-            verdict = await driver.review_once(ctx, item, state["pr"],
+            verdict = await steps.review_once(ctx, item, state["pr"],
                                                state["review_rounds"])
         except UnparseableSource as broken:
             # Agent-written code that does not parse is coder rework, not
             # an engine crash (code_unparseable) — one bounded round.
             if state["review_rounds"] >= max_reviews:
-                await driver.escalate_item(
+                await governance.escalate(
                     ctx, item, state["pr"], "code_reviewer",
                     f"no approval after {max_reviews} fix iterations")
                 return Event(output="unparseable, budget exhausted",
@@ -131,7 +131,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                          actor="code_reviewer")
             return Event(output=verdict.reasoning, route="out_of_scope")
         if state["review_rounds"] >= max_reviews:
-            await driver.escalate_item(
+            await governance.escalate(
                 ctx, item, state["pr"], "code_reviewer",
                 f"no approval after {max_reviews} fix iterations")
             return Event(output="fix budget exhausted", route="escalate")
@@ -140,7 +140,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                      route="changes_requested")
 
     async def coder_fix(node_input):
-        changed, reply = await driver.run_coder(ctx, item, branch,
+        changed, reply = await steps.run_coder(ctx, item, branch,
                                                 feedback=str(node_input))
         if not changed:
             # Impasse: reviewer demanded changes, coder declined. Put the
@@ -149,7 +149,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
             ctx.repo_host.post_comment(state["pr"], (
                 "**🤖 AI coder — response to review (no code changes "
                 f"made)**\n\n{reply or '(no reasoning returned)'}"))
-            await driver.escalate_item(
+            await governance.escalate(
                 ctx, item, state["pr"], "code_reviewer",
                 "coder declined the requested changes (no-change fix round)")
             return Event(output="impasse", route="impasse")
@@ -159,12 +159,12 @@ def build_item_workflow(ctx, item: dict, branch: str,
         from orchestrator.dependency_graph import UnparseableSource
         from orchestrator.rejection import Rejection
         try:
-            result = await driver.verify_once(ctx, item, state["pr"])
+            result = await steps.verify_once(ctx, item, state["pr"])
         except UnparseableSource as broken:
             # Measurement is impossible until the code parses; same
             # bounded rework loop as a missing flag.
             if state["flag_fixes"] >= max_flag_fixes:
-                await driver.escalate_item(
+                await governance.escalate(
                     ctx, item, state["pr"], "verify",
                     f"code still unparseable after {max_flag_fixes} fix")
                 return Event(output="unparseable, budget exhausted",
@@ -182,7 +182,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
             await ctx.set_status(item["id"], "verified", state["pr"])
             return Event(output=result.title_prefix, route="labeled")
         if state["flag_fixes"] >= max_flag_fixes:
-            await driver.escalate_item(
+            await governance.escalate(
                 ctx, item, state["pr"], "verify",
                 f"flag still missing after {max_flag_fixes} fix")
             return Event(output="flag budget exhausted", route="escalate")
@@ -202,7 +202,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
     async def coder_flag_fix(node_input):
         # node_input is the fix instruction verify chose (flag policy OR
         # a syntax error) — one fix path serves both, returning to verify.
-        await driver.run_coder(ctx, item, branch, feedback=str(node_input))
+        await steps.run_coder(ctx, item, branch, feedback=str(node_input))
         return Event(output="flagged")
 
     async def preprod_ci(node_input):
@@ -210,7 +210,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
         # over revision creation; serialize them even when coders run in
         # parallel (same guard the sequential driver held).
         async with ctx.ci_lock:
-            ok = await driver.run_preprod_ci(ctx, item, state["pr"],
+            ok = await steps.run_preprod_ci(ctx, item, state["pr"],
                                              state["verified"])
         if ok:
             await ctx.set_status(item["id"], "preprod_passed", state["pr"])
@@ -219,7 +219,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
         return Event(output=ok, route="failed")
 
     async def approver(node_input):
-        state["gate_baseline"] = await driver.run_approver(
+        state["gate_baseline"] = await steps.run_approver(
             ctx, item, state["pr"], state["verified"])
         await ctx.set_status(item["id"], "awaiting_approval", state["pr"])
         return Event(output="dossier posted")
