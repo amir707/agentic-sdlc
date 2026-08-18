@@ -30,36 +30,12 @@ from google.adk.workflow import FunctionNode, Workflow
 
 from mcp_server.vocab import STATUS_LABELS, ItemStatus
 from orchestrator import pipeline
-from orchestrator.pipeline import PipelineState, Route
+from orchestrator.definition import PER_ITEM_EDGES, START, Route
+from orchestrator.pipeline import PipelineState
 
-# Name-level edge table (source, target, route|None). Cycle edges carry
-# routes (ADK rejects unconditional cycles) and realize the definition's
-# back-edges:
-#   code_reviewer -> coder_fix -> code_reviewer   (changes_requested)
-#   verify -> coder_flag_fix -> verify            (policy_flag_required)
-EDGE_TABLE: list[tuple[str, str, Route | None]] = [
-    ("START", "coder", None),
-    ("coder", "code_reviewer", None),
-    ("code_reviewer", "verify", Route.APPROVED),
-    ("code_reviewer", "coder_fix", Route.CHANGES_REQUESTED),
-    ("code_reviewer", "rejected", Route.OUT_OF_SCOPE),
-    ("code_reviewer", "escalated", Route.ESCALATE),
-    ("coder_fix", "code_reviewer", Route.FIXED),
-    ("coder_fix", "escalated", Route.IMPASSE),
-    ("verify", "preprod_ci", Route.LABELED),
-    ("verify", "coder_flag_fix", Route.POLICY_FLAG_REQUIRED),
-    ("verify", "escalated", Route.ESCALATE),
-    ("coder_flag_fix", "verify", None),
-    ("preprod_ci", "approver", Route.PASSED),
-    ("preprod_ci", "failed", Route.FAILED),
-    ("approver", "approval_gate", None),
-    ("approval_gate", "queued", Route.APPROVE),
-    ("approval_gate", "rejected", Route.REJECT),
-]
-
-# The four terminal nodes; their JSON `outcome` is the executor's result.
-TERMINALS = (ItemStatus.QUEUED, ItemStatus.REJECTED, ItemStatus.FAILED,
-             ItemStatus.ESCALATED)
+# The topology comes from the definition; this module only renders it
+# (kept under the old name for readers/tests: EDGE_TABLE is the graph).
+EDGE_TABLE = list(PER_ITEM_EDGES)
 
 
 def build_item_workflow(ctx, item: dict, branch: str,
@@ -150,7 +126,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
     edges = []
     for src, targets in by_source.items():
-        src_node = "START" if src == "START" else nodes[src]
+        src_node = START if src == START else nodes[src]
         routed = {route: nodes[dst] for dst, route in targets
                   if route is not None}
         plain = [nodes[dst] for dst, route in targets if route is None]

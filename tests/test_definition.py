@@ -161,3 +161,65 @@ def test_stage_markers_key_on_head_sha():
     assert _find_marker(comments, _marker("review", sha_b, "approve")) is None
     # markers are invisible to humans (HTML comments)
     assert _marker("ci", sha_a, "passed").startswith("<!--")
+
+
+# --- the per-item graph is ONE definition -----------------------------------------
+
+def test_every_per_item_step_is_a_graph_node_and_every_back_edge_is_a_routed_cycle():
+    from orchestrator.definition import PER_ITEM_EDGES, Route, per_item_nodes
+    nodes = set(per_item_nodes())
+    assert {s.name for s in SDLC.per_item} <= nodes
+    for step in SDLC.per_item:
+        if step.back_edge:
+            # the reason code IS the route out of the step that requested the fix
+            assert any(src == step.name and route == Route(step.back_edge.reason_code)
+                       for src, _, route in PER_ITEM_EDGES), step.name
+            # ...and the fix leg cycles back to that step
+            fix_legs = {dst for src, dst, route in PER_ITEM_EDGES
+                        if src == step.name and route == Route(step.back_edge.reason_code)}
+            assert any(src in fix_legs and dst == step.name
+                       for src, dst, _ in PER_ITEM_EDGES), step.name
+
+
+def test_terminals_are_store_statuses_and_every_other_node_has_a_way_out():
+    from mcp_server.vocab import ItemStatus
+    from orchestrator.definition import PER_ITEM_EDGES, TERMINALS, per_item_nodes
+    assert set(TERMINALS) <= {s.value for s in ItemStatus}
+    sources = {src for src, _, _ in PER_ITEM_EDGES}
+    for node in per_item_nodes():
+        if node in TERMINALS:
+            assert node not in sources, f"terminal {node} has an outgoing edge"
+        else:
+            assert node in sources, f"{node} is a dead end"
+
+
+def test_every_route_is_used_and_cycles_carry_routes():
+    from orchestrator.definition import PER_ITEM_EDGES, Route
+    used = {r for _, _, r in PER_ITEM_EDGES if r is not None}
+    assert used == set(Route)
+    # unrouted edges alone must form NO cycle (engines reject unconditional cycles)
+    plain = {}
+    for src, dst, r in PER_ITEM_EDGES:
+        if r is None:
+            plain.setdefault(src, []).append(dst)
+
+    def reaches(a, b, seen=()):
+        return a == b or any(reaches(n, b, seen + (a,)) for n in plain.get(a, []) if n not in seen)
+    for src, dsts in plain.items():
+        for dst in dsts:
+            assert not reaches(dst, src), f"unrouted cycle through {src} -> {dst}"
+
+
+def test_architecture_doc_pipeline_is_generated_from_the_definition():
+    """docs/architecture.md's pipeline block must equal what
+    scripts/render_pipeline.py renders from the definition — run it with
+    --write after changing the graph."""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "render_pipeline", root / "scripts" / "render_pipeline.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    assert mod.block() in (root / "docs" / "architecture.md").read_text(), (
+        "docs/architecture.md pipeline block is stale: "
+        "python scripts/render_pipeline.py --write")
