@@ -27,8 +27,8 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
-from mcp_server.vocab import STATUS_LABELS, Actor, Decision, ItemStatus
-from orchestrator import governance, steps
+from mcp_server.vocab import STATUS_LABELS, Actor, ItemStatus
+from orchestrator import governance, pipeline, steps
 from orchestrator.pipeline import PipelineState, Route
 from orchestrator.gate import check_decision
 
@@ -79,79 +79,21 @@ def build_item_workflow(ctx, item: dict, branch: str,
         ctx.board.finish(item["id"], STATUS_LABELS[kind])
         return {"outcome": kind, "pr": state.pr}
 
-    async def coder(node_input):
-        if state.pr is None:                      # fresh item
-            await steps.run_coder(ctx, item, branch)
-            state.pr = await steps.open_pr(ctx, item, branch)
-            await ctx.set_status(item["id"], ItemStatus.IN_REVIEW, state.pr)
-        return Event(output=state.pr)
+    def _event(result: pipeline.NodeResult) -> Event:
+        return Event(output=result.output, route=result.route)
 
-    max_reviews = int(flow["max_fix_iterations"])
-    max_flag_fixes = int(flow["max_flag_fix_iterations"])
-    _UNPARSEABLE_FIX = ("Your change does not parse: {detail}. Fix the syntax "
-                        "error so every file compiles and the tests run.")
+    async def coder(node_input):
+        return _event(await pipeline.coder(ctx, item, branch, state))
 
     async def code_reviewer(node_input):
-        from orchestrator.dependency_graph import UnparseableSource
-        from orchestrator.rejection import Rejection
-        # Resume idempotency: this head may already carry an approval (G5).
-        if steps.review_already_approved(ctx, state.pr):
-            return Event(output="already approved", route=Route.APPROVED)
-        try:
-            verdict = await steps.review_once(ctx, item, state.pr,
-                                               state.review_rounds)
-        except UnparseableSource as broken:
-            # Agent-written code that does not parse is coder rework, not
-            # an engine crash (code_unparseable) — one bounded round.
-            if state.review_rounds >= max_reviews:
-                await governance.escalate(
-                    ctx, item, state.pr, Actor.CODE_REVIEWER,
-                    f"no approval after {max_reviews} fix iterations")
-                return Event(output="unparseable, budget exhausted",
-                             route=Route.ESCALATE)
-            await governance.bounce(ctx, item,
-                         Rejection(state.pr, "code_unparseable", "coder",
-                                   f"the code does not parse: {broken}"),
-                         actor=Actor.CODE_REVIEWER)
-            state.review_rounds += 1
-            return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
-                         route=Route.CHANGES_REQUESTED)
-
-        if verdict.verdict == "approve":
-            await ctx.audit(Actor.CODE_REVIEWER, Decision.APPROVE_REVIEW,
-                            {"pr": state.pr,
-                             "iterations": state.review_rounds + 1})
-            return Event(output=verdict.reasoning, route=Route.APPROVED)
-        if verdict.verdict == "out_of_scope":
-            await governance.bounce(ctx, item,
-                         Rejection(state.pr, "out_of_scope", "author",
-                                   verdict.reasoning),
-                         actor=Actor.CODE_REVIEWER)
-            return Event(output=verdict.reasoning, route=Route.OUT_OF_SCOPE)
-        if state.review_rounds >= max_reviews:
-            await governance.escalate(
-                ctx, item, state.pr, Actor.CODE_REVIEWER,
-                f"no approval after {max_reviews} fix iterations")
-            return Event(output="fix budget exhausted", route=Route.ESCALATE)
-        state.review_rounds += 1
-        return Event(output=verdict.model_dump_json(),
-                     route=Route.CHANGES_REQUESTED)
+        return _event(await pipeline.code_reviewer(ctx, item, state))
 
     async def coder_fix(node_input):
-        changed, reply = await steps.run_coder(ctx, item, branch,
-                                                feedback=str(node_input))
-        if not changed:
-            # Impasse: reviewer demanded changes, coder declined. Put the
-            # disagreement ON THE ARTIFACT and hand it to a human —
-            # re-reviewing an identical diff resolves nothing.
-            ctx.repo_host.post_comment(state.pr, (
-                "**🤖 AI coder — response to review (no code changes "
-                f"made)**\n\n{reply or '(no reasoning returned)'}"))
-            await governance.escalate(
-                ctx, item, state.pr, Actor.CODE_REVIEWER,
-                "coder declined the requested changes (no-change fix round)")
-            return Event(output="impasse", route=Route.IMPASSE)
-        return Event(output="fixed", route=Route.FIXED)
+        return _event(await pipeline.coder_fix(ctx, item, branch, state,
+                                               feedback=str(node_input)))
+
+    max_flag_fixes = int(flow["max_flag_fix_iterations"])
+    _UNPARSEABLE_FIX = pipeline._UNPARSEABLE_FIX
 
     async def verify(node_input):
         from orchestrator.dependency_graph import UnparseableSource
