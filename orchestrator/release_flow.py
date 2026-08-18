@@ -17,7 +17,7 @@ import os
 
 from adapters import deploy
 from adapters.repo_host import RepoHostError
-from mcp_server.vocab import ItemStatus
+from mcp_server.vocab import Actor, Decision, ItemStatus
 from orchestrator import governance, schemas
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import UnparseableSource
@@ -82,7 +82,7 @@ async def decide_release_pr(ctx: RunContext, item: dict,
         return await _decide_release_pr(ctx, item, confidence)
     except RepoHostError as exc:
         await governance.escalate(
-            ctx, item, item["pr"], "release_guard",
+            ctx, item, item["pr"], Actor.RELEASE_GUARD,
             "repo host error while releasing this PR — the store and the "
             "repo may disagree (reset-item to replay, or reseed if the "
             "repo was recreated)", error=str(exc)[:200])
@@ -106,12 +106,12 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
         # No rework loop this late: post-approval commits are a human's to
         # answer for. Block the merge and escalate.
         await governance.escalate(
-            ctx, item, pr, "release_guard",
+            ctx, item, pr, Actor.RELEASE_GUARD,
             f"post-approval head does not parse: {broken}", head_sha=head)
         return "escalated"
     if verified.needs_flag:
         await governance.escalate(
-            ctx, item, pr, "release_guard",
+            ctx, item, pr, Actor.RELEASE_GUARD,
             "post-approval head violates the flag policy", head_sha=head)
         return "escalated"
     if not preprod_passed_for_head(ctx, pr, head):
@@ -121,7 +121,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             ci_ok = await run_preprod_ci(ctx, item, pr, verified)
         ctx.board.finish(item["id"], "head re-verified + preprod deployed")
         if not ci_ok:
-            await governance.fail(ctx, item, pr, "release_guard",
+            await governance.fail(ctx, item, pr, Actor.RELEASE_GUARD,
                                   "preprod failed for the current head",
                                   head_sha=head)
             return "failed"
@@ -173,7 +173,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             # is a documented successor, not built: the PR stays queued with
             # an audited reason for a human (rebase, or make reset-item).
             await governance.hold(
-                ctx, item, pr, "release_guard",
+                ctx, item, pr, Actor.RELEASE_GUARD,
                 "merge failed — branch likely conflicts with advanced "
                 "main; rebase or reset-item", error=str(exc)[:200])
             return "held"
@@ -186,7 +186,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             # a human completes the promote. Escalate with the facts,
             # never crash the pass.
             await governance.escalate(
-                ctx, item, pr, "release_guard",
+                ctx, item, pr, Actor.RELEASE_GUARD,
                 "PR merged but the traffic shift failed — promote tag "
                 f"pr-{pr} manually (adapters.deploy promote) and set the "
                 "item released", error=str(exc)[:300])
@@ -194,7 +194,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
         await ctx.store.call("record_deploy", pr=pr,
                              revision=f"pr-{pr}", traffic="100",
                              area=verified.primary_area)
-        await ctx.audit("release_manager", "merge_pr", factors)
+        await ctx.audit(Actor.RELEASE_MANAGER, Decision.MERGE_PR, factors)
         await ctx.set_status(item["id"], ItemStatus.RELEASED, pr)
         rule = decision.factors.get("dominating_rule", "")
         print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})"
@@ -203,7 +203,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
         return "merged"
     # Held: the item STAYS queued in the store and is reconsidered on the
     # next release EVENT (incident cleared, confidence window passed).
-    await ctx.audit("release_manager", "hold_merge", factors)
+    await ctx.audit(Actor.RELEASE_MANAGER, Decision.HOLD_MERGE, factors)
     rule = decision.factors.get("dominating_rule", "")
     print(f"[release] HELD PR #{pr}"
           + (f" — rule: {rule}" if rule else "")

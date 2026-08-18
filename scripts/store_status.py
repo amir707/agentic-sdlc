@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp_server import db                      # noqa: E402
-from mcp_server.vocab import STATUS_LABELS, ItemStatus  # noqa: E402
+from mcp_server.vocab import STATUS_LABELS, Decision, ItemStatus  # noqa: E402
 from orchestrator.activity import read_board, read_recent_history  # noqa: E402
 
 _LABELS = STATUS_LABELS
@@ -117,15 +117,14 @@ _STATUS_WORDS = [
 ]
 
 _DECISION_WORDS = [
-    ("human_override_escalation", "1;33"),
-    ("human_approve", "32"),
-    ("merge_pr", "32"),
-    ("resolve_incident", "32"),
-    ("hold_merge", "31"),
-    ("reject_pr", "31"),
-    ("escalate_to_human", "1;31"),
-    ("open_incident", "1;31"),
-    ("escalate_risk_label", "33"),
+    (Decision.HUMAN_OVERRIDE_ESCALATION, "1;33"),
+    (Decision.HUMAN_APPROVE, "32"),
+    (Decision.MERGE_PR, "32"),
+    (Decision.RESOLVE_INCIDENT, "32"),
+    (Decision.HOLD_MERGE, "31"),
+    (Decision.REJECT_PR, "31"),
+    (Decision.ESCALATE_TO_HUMAN, "1;31"),
+    (Decision.ESCALATE_RISK_LABEL, "33"),
 ]
 
 

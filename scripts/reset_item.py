@@ -26,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import os  # noqa: E402
 
 from adapters.repo_host import GitHubRepoHost  # noqa: E402
-from mcp_server import db                      # noqa: E402
+from mcp_server import db
+from mcp_server.vocab import Actor, Decision                      # noqa: E402
 from orchestrator import provisioning          # noqa: E402
 from orchestrator.config import load_project   # noqa: E402
 from orchestrator.driver import _branch        # noqa: E402
@@ -75,7 +76,7 @@ def main() -> None:
                      (args.item,))
         print("assessment deleted (item will be re-assessed)")
     conn.commit()
-    db.append_audit(conn, "operator", "reset_item", {
+    db.append_audit(conn, Actor.OPERATOR, Decision.RESET_ITEM, {
         "item": args.item, "closed_pr": closed_pr, "branch": branch,
         "with_assessment": args.with_assessment})
     print(f"{args.item}: status -> pending, pr -> none (audited)")

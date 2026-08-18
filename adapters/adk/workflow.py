@@ -27,7 +27,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
-from mcp_server.vocab import STATUS_LABELS, ItemStatus
+from mcp_server.vocab import STATUS_LABELS, Actor, Decision, ItemStatus
 from orchestrator import governance, steps
 from orchestrator.gate import check_decision
 
@@ -106,20 +106,20 @@ def build_item_workflow(ctx, item: dict, branch: str,
             # an engine crash (code_unparseable) — one bounded round.
             if state["review_rounds"] >= max_reviews:
                 await governance.escalate(
-                    ctx, item, state["pr"], "code_reviewer",
+                    ctx, item, state["pr"], Actor.CODE_REVIEWER,
                     f"no approval after {max_reviews} fix iterations")
                 return Event(output="unparseable, budget exhausted",
                              route="escalate")
             await governance.bounce(ctx, item,
                          Rejection(state["pr"], "code_unparseable", "coder",
                                    f"the code does not parse: {broken}"),
-                         actor="code_reviewer")
+                         actor=Actor.CODE_REVIEWER)
             state["review_rounds"] += 1
             return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
                          route="changes_requested")
 
         if verdict.verdict == "approve":
-            await ctx.audit("code_reviewer", "approve_review",
+            await ctx.audit(Actor.CODE_REVIEWER, Decision.APPROVE_REVIEW,
                             {"pr": state["pr"],
                              "iterations": state["review_rounds"] + 1})
             return Event(output=verdict.reasoning, route="approved")
@@ -127,11 +127,11 @@ def build_item_workflow(ctx, item: dict, branch: str,
             await governance.bounce(ctx, item,
                          Rejection(state["pr"], "out_of_scope", "author",
                                    verdict.reasoning),
-                         actor="code_reviewer")
+                         actor=Actor.CODE_REVIEWER)
             return Event(output=verdict.reasoning, route="out_of_scope")
         if state["review_rounds"] >= max_reviews:
             await governance.escalate(
-                ctx, item, state["pr"], "code_reviewer",
+                ctx, item, state["pr"], Actor.CODE_REVIEWER,
                 f"no approval after {max_reviews} fix iterations")
             return Event(output="fix budget exhausted", route="escalate")
         state["review_rounds"] += 1
@@ -149,7 +149,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                 "**🤖 AI coder — response to review (no code changes "
                 f"made)**\n\n{reply or '(no reasoning returned)'}"))
             await governance.escalate(
-                ctx, item, state["pr"], "code_reviewer",
+                ctx, item, state["pr"], Actor.CODE_REVIEWER,
                 "coder declined the requested changes (no-change fix round)")
             return Event(output="impasse", route="impasse")
         return Event(output="fixed", route="fixed")
@@ -164,14 +164,14 @@ def build_item_workflow(ctx, item: dict, branch: str,
             # bounded rework loop as a missing flag.
             if state["flag_fixes"] >= max_flag_fixes:
                 await governance.escalate(
-                    ctx, item, state["pr"], "verify",
+                    ctx, item, state["pr"], Actor.VERIFY,
                     f"code still unparseable after {max_flag_fixes} fix")
                 return Event(output="unparseable, budget exhausted",
                              route="escalate")
             await governance.bounce(ctx, item,
                          Rejection(state["pr"], "code_unparseable", "coder",
                                    f"the code does not parse: {broken}"),
-                         actor="verify")
+                         actor=Actor.VERIFY)
             state["flag_fixes"] += 1
             return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
                          route="policy_flag_required")
@@ -182,7 +182,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
             return Event(output=result.title_prefix, route="labeled")
         if state["flag_fixes"] >= max_flag_fixes:
             await governance.escalate(
-                ctx, item, state["pr"], "verify",
+                ctx, item, state["pr"], Actor.VERIFY,
                 f"flag still missing after {max_flag_fixes} fix")
             return Event(output="flag budget exhausted", route="escalate")
         state["flag_fixes"] += 1
@@ -191,7 +191,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
                                f"verified risk {result.verified_risk} "
                                "requires a feature flag; none gates the new "
                                "behavior"),
-                     actor="verify")
+                     actor=Actor.VERIFY)
         return Event(output=(
             "Policy violation: this change's verified risk requires the NEW "
             "behavior to be gated behind a feature flag (default off) in "
@@ -239,7 +239,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
             await governance.bounce(ctx, item,
                          Rejection(state["pr"], "human_declined", "backlog",
                                    decision.reason or "no reason given"),
-                         actor="approval_gate")
+                         actor=Actor.APPROVAL_GATE)
             yield Event(output=False, route="reject")
             return
         if decision:  # hold: advance the baseline past it, keep waiting

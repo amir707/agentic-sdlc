@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 from adapters import deploy
+from mcp_server.vocab import Actor, Decision
 from orchestrator import schemas
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import blast_radius
@@ -85,7 +86,7 @@ async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
     # labels: "[area:payments][risk:high][flag:yes] PAY-101: <title>".
     pr = ctx.repo_host.open_pr(branch, f"{item['id']}: {item['title']}", body)
     # The item<->PR mapping lives in the audit trail (status views use it).
-    await ctx.audit("coder", "open_pr",
+    await ctx.audit(Actor.CODER, Decision.OPEN_PR,
                     {"item": item["id"], "pr": pr, "branch": branch})
     print(f"[coder] PR #{pr} opened for {item['id']}", flush=True)
     return pr
@@ -168,7 +169,7 @@ async def verify_once(ctx: RunContext, item: dict,
                                 str(ctx.workspace.dir),
                                 assessed_risk=assessed)
     if result.escalated:
-        await ctx.audit("verify", "escalate_risk_label", {
+        await ctx.audit(Actor.VERIFY, Decision.ESCALATE_RISK_LABEL, {
             "pr": pr, "claimed_risk": result.claimed_risk,
             "assessed_risk": assessed,
             "verified_risk": result.verified_risk,
@@ -209,7 +210,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
         # Degrade, don't die: an infrastructure failure (build error,
         # missing baseline service, quota) fails THIS item's preprod —
         # audited with the redacted command — and the sprint walks on.
-        await ctx.audit("preprod_ci", "preprod_result", {
+        await ctx.audit(Actor.PREPROD_CI, Decision.PREPROD_RESULT, {
             "pr": pr, "passed": False, "revision": f"pr-{pr}",
             "error": str(exc)[:300]})
         print(f"[ci] PR #{pr} preprod FAILED (infrastructure): "
@@ -222,7 +223,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
         await ctx.store.call("record_deploy", pr=pr,
                              revision=ci.revision_tag, traffic="preprod",
                              area=verified.primary_area)
-    await ctx.audit("preprod_ci", "preprod_result", {
+    await ctx.audit(Actor.PREPROD_CI, Decision.PREPROD_RESULT, {
         "pr": pr, "passed": ci.passed, "revision": ci.revision_tag,
         "preprod_url": ci.preprod_url, "smoke": ci.smoke})
     print(f"[ci] PR #{pr} preprod "
@@ -267,7 +268,7 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     ctx.repo_host.post_comment(pr, (
         schemas.render_dossier(dossier, approvers)
         + "\n\n" + marker("dossier", sha)))
-    await ctx.audit("approver", "post_dossier", {"pr": pr})
+    await ctx.audit(Actor.APPROVER, Decision.POST_DOSSIER, {"pr": pr})
     # The gate baseline is captured HERE, at dossier-post time: a human
     # who decides on GitHub before the gate first looks must be seen.
     return len(ctx.repo_host.get_review_threads(pr))

@@ -60,3 +60,58 @@ STATUS_LABELS: dict[ItemStatus, str] = {
     ItemStatus.ESCALATED: "escalated to a human",
     ItemStatus.FAILED: "failed preprod",
 }
+
+
+class Actor(StrEnum):
+    """Who is speaking in the audit trail — the component, not a
+    person (a human's identity is a FACTOR, e.g. author=...)."""
+    CODER = "coder"
+    CODE_REVIEWER = "code_reviewer"
+    VERIFY = "verify"
+    PREPROD_CI = "preprod_ci"
+    APPROVER = "approver"
+    APPROVAL_GATE = "approval_gate"
+    SPRINT_PACKER = "sprint_packer"
+    RELEASE_MANAGER = "release_manager"   # the agent's merge/hold judgment
+    RELEASE_GUARD = "release_guard"       # the deterministic gates around it
+    ORCHESTRATOR = "orchestrator"
+    INCIDENT_RESOLVER = "incident_resolver"
+    OPERATOR = "operator"                 # a human running an ops script
+
+
+class Decision(StrEnum):
+    """What was decided. The audit trail is the eval oracle
+    (scripts/verify_demo.py) and the dashboard's colouring key — a
+    renamed decision used to break both silently; now it is a rename
+    here or nowhere."""
+    # planning
+    REFUSE_ITEM = "refuse_item"
+    CREATE_SPRINT = "create_sprint"
+    # per-item pipeline
+    OPEN_PR = "open_pr"
+    APPROVE_REVIEW = "approve_review"
+    REJECT_PR = "reject_pr"
+    ESCALATE_RISK_LABEL = "escalate_risk_label"
+    PREPROD_RESULT = "preprod_result"
+    POST_DOSSIER = "post_dossier"
+    # the human gate
+    HUMAN_APPROVE = "human_approve"
+    HUMAN_REJECT = "human_reject"
+    HUMAN_HOLD = "human_hold"
+    HUMAN_OVERRIDE_ESCALATION = "human_override_escalation"
+    HUMAN_PR = "human_pr"
+    IGNORE_UNAUTHORIZED_COMMAND = "ignore_unauthorized_command"
+    # governance outcomes (orchestrator/governance.py)
+    ESCALATE_TO_HUMAN = "escalate_to_human"
+    HOLD_MERGE = "hold_merge"
+    # release
+    MERGE_PR = "merge_pr"
+    # incidents / ops
+    RESOLVE_INCIDENT = "resolve_incident"
+    RESET_ITEM = "reset_item"
+
+    @classmethod
+    def human(cls, kind: str) -> "Decision":
+        """The gate's audit decision for a human command kind
+        (approve | reject | hold)."""
+        return cls(f"human_{kind}")

@@ -14,6 +14,7 @@ Launch reason codes:
 """
 
 from dataclasses import dataclass
+from mcp_server.vocab import Decision
 
 
 @dataclass
@@ -31,7 +32,7 @@ async def reject(store, repo_host, rejection: Rejection, actor: str) -> None:
     repo_host.post_comment(rejection.pr, (
         f"**Rejected — `{rejection.reason_code}`** "
         f"(returned to {rejection.return_to})\n\n{rejection.reasoning}"))
-    await store.call("append_audit", actor=actor, decision="reject_pr",
+    await store.call("append_audit", actor=actor, decision=Decision.REJECT_PR,
                      factors={
                          "pr": rejection.pr,
                          "reason_code": rejection.reason_code,
