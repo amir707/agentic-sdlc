@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp_server import db  # noqa: E402
+from mcp_server.vocab import Decision  # noqa: E402
 
 
 class Checks:
@@ -63,9 +64,9 @@ def main() -> int:
     checks = Checks()
 
     print("\n== CORE: planning ==")
-    sprints = _by_decision(audit, "create_sprint")
+    sprints = _by_decision(audit, Decision.CREATE_SPRINT)
     checks.expect(len(sprints) == 1, "exactly one sprint was created")
-    refusals = _by_decision(audit, "refuse_item")
+    refusals = _by_decision(audit, Decision.REFUSE_ITEM)
     checks.expect(len(refusals) >= 2,
                   f"packer refused at least two items ({len(refusals)} refusals)")
     checks.expect(
@@ -76,23 +77,23 @@ def main() -> int:
         "at least one refusal cites the risk-points budget")
 
     print("\n== CORE: claimed-vs-actual guardrail (the PAY-102 trap) ==")
-    escalations = _by_decision(audit, "escalate_risk_label")
+    escalations = _by_decision(audit, Decision.ESCALATE_RISK_LABEL)
     checks.expect(
         any(e["factors"].get("claimed_risk") == "low"
             and e["factors"].get("verified_risk") == "medium"
             for e in escalations),
         "verify escalated a claimed-low change to medium")
-    flag_rejections = [e for e in _by_decision(audit, "reject_pr")
+    flag_rejections = [e for e in _by_decision(audit, Decision.REJECT_PR)
                        if e["factors"].get("reason_code") == "policy_flag_required"]
     checks.expect(len(flag_rejections) >= 1,
                   "policy_flag_required rejection fired (flag invariant)")
 
     print("\n== CORE: review and gate ==")
-    checks.expect(len(_by_decision(audit, "approve_review")) >= 2,
+    checks.expect(len(_by_decision(audit, Decision.APPROVE_REVIEW)) >= 2,
                   "reviewer approved at least two PRs")
-    checks.expect(len(_by_decision(audit, "post_dossier")) >= 2,
+    checks.expect(len(_by_decision(audit, Decision.POST_DOSSIER)) >= 2,
                   "approver posted at least two dossiers")
-    checks.expect(len(_by_decision(audit, "human_approve")) >= 2,
+    checks.expect(len(_by_decision(audit, Decision.HUMAN_APPROVE)) >= 2,
                   "human approved at least two PRs at the gate")
 
     print("\n== CORE: incident-aware release ==")
@@ -101,13 +102,13 @@ def main() -> int:
     checks.expect(len(payments) >= 1, "a payments incident was opened")
     checks.expect(any(i["status"] == "resolved" for i in payments),
                   "the payments incident was resolved (hysteresis closure)")
-    checks.expect(len(_by_decision(audit, "resolve_incident")) >= 1,
+    checks.expect(len(_by_decision(audit, Decision.RESOLVE_INCIDENT)) >= 1,
                   "the resolution was audited with recovery factors")
-    holds = _by_decision(audit, "hold_merge")
+    holds = _by_decision(audit, Decision.HOLD_MERGE)
     checks.expect(
         any("incident" in json.dumps(h["factors"]).lower() for h in holds),
         "release manager held a merge citing incident state")
-    merges = _by_decision(audit, "merge_pr")
+    merges = _by_decision(audit, Decision.MERGE_PR)
     checks.expect(len(merges) >= 2,
                   f"release manager merged at least two PRs ({len(merges)} merges)")
 

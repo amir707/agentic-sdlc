@@ -15,7 +15,8 @@ import sys
 from dataclasses import replace
 
 from adapters.store_client import DeliveryStore
-from mcp_server.vocab import ItemStatus
+from mcp_server.vocab import Actor, ItemStatus
+from mcp_server.vocab import Decision as AuditDecision
 from orchestrator import governance
 from orchestrator.context import RunContext
 from orchestrator.gate import Decision, parse_command
@@ -61,7 +62,7 @@ async def process_item(ctx: RunContext, item: dict) -> None:
         if "runaway guard" not in str(exc):
             raise
         await governance.escalate(
-            ctx, item, None, "orchestrator",
+            ctx, item, None, Actor.ORCHESTRATOR,
             "agent exceeded its step budget mid-item; a human reviews the "
             "PR state (reset-item to replay)",
             error=str(exc)[:120], note="escalated (runaway agent)")
@@ -98,12 +99,12 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
                 ctx, item,
                 Rejection(pr, "human_declined", "backlog",
                           override.reason or "declined after escalation"),
-                actor="approval_gate")
+                actor=Actor.APPROVAL_GATE)
             return None
         # /approve: the human overrules the escalation. Judgment is
         # theirs; the MACHINE checks are not — the release gate will
         # re-verify and re-deploy this head before any merge.
-        await ctx.audit("approval_gate", "human_override_escalation", {
+        await ctx.audit(Actor.APPROVAL_GATE, AuditDecision.HUMAN_OVERRIDE_ESCALATION, {
             "pr": pr, "item": item["id"], "author": override.author,
             "was_status": status})
         await ctx.set_status(item["id"], ItemStatus.QUEUED, pr)
@@ -118,7 +119,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
                 # Headless (Cloud Run Job): nobody can type a PR number.
                 # Escalate and move on; a later run resumes the item.
                 await governance.escalate(
-                    ctx, item, None, "orchestrator",
+                    ctx, item, None, Actor.ORCHESTRATOR,
                     "human-implemented item needs an operator terminal — "
                     "resume interactively", note="escalated (headless run)")
                 return None
@@ -126,7 +127,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
             raw = input(f"[human item] {item['id']} is human-implemented; "
                         "enter PR number when raised: ").strip()
             pr = int(raw)
-            await ctx.audit("orchestrator", "human_pr",
+            await ctx.audit(Actor.ORCHESTRATOR, AuditDecision.HUMAN_PR,
                             {"item": item["id"], "pr": pr})
             ctx.workspace.checkout_detached(
                 ctx.repo_host.get_pr(pr)["head_ref"])
@@ -152,7 +153,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     # duplicate keys trying). A conflicted PR escalates immediately.
     if ctx.repo_host.get_pr(pr).get("mergeable") is False:
         await governance.escalate(
-            ctx, item, pr, "release_guard",
+            ctx, item, pr, Actor.RELEASE_GUARD,
             "merge conflict with main — human rebases (or make reset-item "
             "to replay); agents never resolve conflicts",
             note="merge conflict — human")

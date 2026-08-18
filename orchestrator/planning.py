@@ -7,6 +7,8 @@ reading their own prior output from the store.
 
 import json
 
+from mcp_server.vocab import Actor, Decision
+
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import build_import_graph
 from sdlc_steps import sprint_packer
@@ -56,7 +58,7 @@ async def run_sprint_packer(ctx: RunContext,
     result = sprint_packer.pack(items, assessments,
                                 ctx.project.policy("sprint_packer"))
     for refusal in result.refused:
-        await ctx.audit("sprint_packer", "refuse_item", {
+        await ctx.audit(Actor.SPRINT_PACKER, Decision.REFUSE_ITEM, {
             "item": refusal.item_id, "constraint": refusal.constraint,
             "detail": refusal.detail})
         print(f"[pack] REFUSED {refusal.item_id}: {refusal.constraint} "
@@ -64,7 +66,7 @@ async def run_sprint_packer(ctx: RunContext,
     sprint = await ctx.store.call(
         "create_sprint", item_ids=[i["id"] for i in result.selected],
         rationale=result.rationale)
-    await ctx.audit("sprint_packer", "create_sprint", {
+    await ctx.audit(Actor.SPRINT_PACKER, Decision.CREATE_SPRINT, {
         "sprint": sprint["id"], "items": sprint["item_ids"],
         "rationale": result.rationale})
     print(f"[pack] sprint #{sprint['id']}: {sprint['item_ids']}", flush=True)

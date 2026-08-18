@@ -27,7 +27,7 @@ from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
 
 from mcp_server import db
-from mcp_server.vocab import ItemStatus
+from mcp_server.vocab import Actor, Decision, ItemStatus
 
 # Local trust rung binds loopback; a cloud deployment sets
 # DELIVERY_STORE_HOST=0.0.0.0 and Cloud Run injects PORT.
@@ -156,7 +156,7 @@ def resolve_incident(incident_id: int, factors: dict) -> dict:
         incident = db.resolve_incident(conn, incident_id)
         if incident is None:
             raise ValueError(f"no incident {incident_id}")
-        db.append_audit(conn, "incident_resolver", "resolve_incident",
+        db.append_audit(conn, Actor.INCIDENT_RESOLVER, Decision.RESOLVE_INCIDENT,
                         {"incident": incident_id, **factors})
     return incident
 

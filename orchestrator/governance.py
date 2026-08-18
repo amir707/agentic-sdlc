@@ -12,7 +12,7 @@ Plain forward progress (in_review -> verified -> ...) stays a bare
 `ctx.set_status` — there is nothing to record beyond the status itself.
 """
 
-from mcp_server.vocab import ItemStatus
+from mcp_server.vocab import Actor, Decision, ItemStatus
 from orchestrator.rejection import Rejection, reject
 
 
@@ -25,7 +25,7 @@ async def escalate(ctx, item: dict, pr: int | None, actor: str, rule: str,
     factors = {"item": item["id"], "pr": pr, "rule": rule, **extra}
     if error is not None:
         factors["error"] = error
-    await ctx.audit(actor, "escalate_to_human", factors)
+    await ctx.audit(actor, Decision.ESCALATE_TO_HUMAN, factors)
     await ctx.set_status(item["id"], ItemStatus.ESCALATED, pr)
     ctx.board.finish(item["id"], note or "escalated")
     print(f"[{item['id']}] escalated to human: {rule}", flush=True)
@@ -51,7 +51,7 @@ async def fail(ctx, item: dict, pr: int, actor: str, rule: str,
         factors["head_sha"] = head_sha
     if error is not None:
         factors["error"] = error
-    await ctx.audit(actor, "hold_merge", factors)
+    await ctx.audit(actor, Decision.HOLD_MERGE, factors)
     await ctx.set_status(item["id"], ItemStatus.FAILED, pr)
     print(f"[{item['id']}] BLOCKED PR #{pr}: {rule}", flush=True)
 
@@ -69,5 +69,5 @@ async def hold(ctx, item: dict, pr: int, actor: str, rule: str, *,
         factors["head_sha"] = head_sha
     if error is not None:
         factors["error"] = error
-    await ctx.audit(actor, "hold_merge", factors)
+    await ctx.audit(actor, Decision.HOLD_MERGE, factors)
     print(f"[release] BLOCKED PR #{pr}: {rule}", flush=True)

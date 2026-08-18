@@ -32,6 +32,8 @@ backlog via the unified rejection mechanism).
 """
 
 from dataclasses import dataclass
+from mcp_server.vocab import Actor
+from mcp_server.vocab import Decision as AuditDecision
 
 _COMMANDS = ("/approve", "/reject", "/hold")
 
@@ -92,16 +94,16 @@ async def check_decision(repo_host, store, pr: int, approvers: list[str],
             if audited_ignores is not None:
                 audited_ignores.add(key)
             await store.call(
-                "append_audit", actor="approval_gate",
-                decision="ignore_unauthorized_command",
+                "append_audit", actor=Actor.APPROVAL_GATE,
+                decision=AuditDecision.IGNORE_UNAUTHORIZED_COMMAND,
                 factors={"pr": pr, "author": comment["author"],
                          "body": comment["body"][:100],
                          "rule": "author not on approvers list"})
 
     if decision:
         await store.call(
-            "append_audit", actor="approval_gate",
-            decision=f"human_{decision.kind}",
+            "append_audit", actor=Actor.APPROVAL_GATE,
+            decision=AuditDecision.human(decision.kind),
             factors={"pr": pr, "author": decision.author,
                      "reason": decision.reason or None})
     return decision

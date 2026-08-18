@@ -40,3 +40,28 @@ def test_server_accepts_exactly_the_enum_set():
 
     with pytest.raises(ValueError):
         server.set_item_status("PAY-101", "shipped")  # not a status
+
+
+def test_no_audit_decision_is_spelled_outside_the_enum():
+    """Every audit emission in the engine and store names its decision
+    via Decision.*; a bare literal is a rename waiting to break the
+    oracle. (Scans call sites: ctx.audit(...), append_audit(...),
+    decision=...)."""
+    import pathlib, re
+    from mcp_server.vocab import Decision
+    root = pathlib.Path(__file__).resolve().parent.parent
+    literal = re.compile(
+        r'(?:\.audit\(\s*[^,]+,\s*|append_audit\([^,]+,\s*[^,]+,\s*|decision=)"([a-z_]+)"')
+    offenders = []
+    for pkg in ("orchestrator", "adapters", "sdlc_steps", "mcp_server", "scripts"):
+        for f in (root / pkg).rglob("*.py"):
+            for m in literal.finditer(f.read_text()):
+                offenders.append(f"{f.relative_to(root)}: {m.group(1)}")
+    assert not offenders, offenders
+    # and every enum member is used somewhere (no dead vocabulary)
+    src = "".join(f.read_text() for pkg in ("orchestrator", "adapters", "sdlc_steps", "mcp_server", "scripts")
+                  for f in (root / pkg).rglob("*.py"))
+    unused = [d.name for d in Decision
+              if f"Decision.{d.name}" not in src and f"AuditDecision.{d.name}" not in src
+              and d not in (Decision.HUMAN_APPROVE, Decision.HUMAN_REJECT, Decision.HUMAN_HOLD)]  # built via Decision.human()
+    assert not unused, unused
