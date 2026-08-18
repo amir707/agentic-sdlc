@@ -25,7 +25,6 @@ from google.genai import types
 
 from orchestrator import release_flow
 from sdlc_steps import incident_resolver
-from adapters.store_client import DeliveryStore
 
 _APP_NAME = "agentic_sdlc_release"
 
@@ -57,7 +56,7 @@ def build_release_workflow(ctx) -> Workflow:
         # If a previous run left an incident open and the service has since
         # recovered, close it now (release must not read a stale hold).
         ctx.board.begin("RELEASE", "incident_resolver", "checking recovery")
-        await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
+        await incident_resolver.run(ctx.project, ctx.resolver_store)
         return Event(output="incidents reconciled")
 
     async def load_queue(node_input):

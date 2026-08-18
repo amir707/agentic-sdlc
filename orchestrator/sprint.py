@@ -14,7 +14,6 @@ import asyncio
 import sys
 from dataclasses import replace
 
-from adapters.store_client import DeliveryStore
 from mcp_server.vocab import Actor, ItemStatus
 from mcp_server.vocab import Decision as AuditDecision
 from orchestrator import governance
@@ -190,7 +189,7 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
     # Stale-incident hygiene: if a previous run left an incident open
     # and the service has since recovered, close it now (the resolver
     # also runs before every release pass).
-    await incident_resolver.run(ctx.project, DeliveryStore.for_resolver())
+    await incident_resolver.run(ctx.project, ctx.resolver_store)
 
     # ONE store lifetime = ONE sprint: if a sprint exists, resume it
     # (assessments and packing already happened); `make seed` is the

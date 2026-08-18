@@ -9,6 +9,8 @@ token-authenticated remote URL that only the engine constructs.
 
 import httpx
 
+from orchestrator.ports import RepoHostError  # noqa: F401 (re-exported)
+
 
 class GitHubRepoHost:
     def __init__(self, repo: str, token: str,
@@ -114,6 +116,3 @@ class GitHubRepoHost:
         Never logged; never handed to an agent."""
         return f"https://x-access-token:{self._token}@github.com/{self.repo}.git"
 
-
-class RepoHostError(Exception):
-    pass

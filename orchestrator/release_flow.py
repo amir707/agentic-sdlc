@@ -15,13 +15,12 @@ ensures a passing preprod for it, then asks the release manager.
 import json
 import os
 
-from adapters import deploy
-from adapters.repo_host import RepoHostError
 from mcp_server.vocab import Actor, Decision, ItemStatus
 from orchestrator import governance, schemas
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import UnparseableSource
 from orchestrator.json_util import extract_json
+from orchestrator.ports import DeployError, RepoHostError
 from orchestrator.steps import preprod_passed_for_head, run_preprod_ci, verify_once
 from sdlc_steps.release_manager import spec as rm_spec
 
@@ -178,8 +177,8 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                 "main; rebase or reset-item", error=str(exc)[:200])
             return "held"
         try:
-            deploy.promote(f"pr-{pr}")
-        except deploy.DeployError as exc:
+            ctx.deployer.promote(f"pr-{pr}")
+        except DeployError as exc:
             # The MERGE already landed; only the traffic shift failed.
             # That is a half-released state no rerun can safely finish
             # (the branch is merged; re-verifying it is meaningless) —

@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+from orchestrator.ports import DeployError  # noqa: F401 (raised here, defined by the core)
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -109,12 +110,6 @@ def _run(args: list[str], attempts: int = 2) -> None:
             f"command failed (exit {code}): "
             + " ".join(_redact(a) for a in args)
             + " — gcloud said: " + _redact(stderr_tail.strip()[-500:]))
-
-
-class DeployError(RuntimeError):
-    """A gcloud deploy/traffic command failed (redacted command + error
-    in the message). Callers treat this as an infrastructure failure of
-    ONE stage, never a reason to kill a whole run."""
 
 
 def _describe() -> dict:

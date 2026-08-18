@@ -13,12 +13,12 @@ import re
 import subprocess
 from pathlib import Path
 
-from adapters import deploy
 from mcp_server.vocab import Actor, Decision
 from orchestrator import schemas
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import blast_radius
 from orchestrator.json_util import extract_json
+from orchestrator.ports import DeployError
 from orchestrator.pr_markers import find_marker, marker
 from sdlc_steps import preprod_ci, verify as verify_step
 from sdlc_steps.approver import spec as approver_spec
@@ -206,7 +206,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
     try:
         ci = preprod_ci.run_preprod(pr, str(ctx.workspace.dir),
                                     verified.areas, ctx.project)
-    except deploy.DeployError as exc:
+    except DeployError as exc:
         # Degrade, don't die: an infrastructure failure (build error,
         # missing baseline service, quota) fails THIS item's preprod —
         # audited with the redacted command — and the sprint walks on.

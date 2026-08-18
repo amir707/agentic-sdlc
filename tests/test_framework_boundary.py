@@ -52,6 +52,52 @@ def test_core_never_imports_a_framework():
                     "framework code belongs in adapters/adk/ (ADR-0007)")
 
 
+def _module_level_imports(py_file: Path) -> set[str]:
+    """Imports at module scope only (function-local imports inside a
+    composition-root helper such as context.build_context are wiring,
+    not a dependency of the module's logic)."""
+    tree = ast.parse(py_file.read_text(), filename=str(py_file))
+    modules: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            modules |= {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module)
+    return modules
+
+
+def test_orchestrator_depends_on_ports_not_adapters():
+    """The core talks to the repo host, the store and the deploy tool
+    through orchestrator/ports.py Protocols. A module-level `adapters`
+    import in orchestrator/ (outside the composition roots) is the
+    dependency arrow pointing the wrong way."""
+    for py_file in (ROOT / "orchestrator").rglob("*.py"):
+        if py_file in COMPOSITION_ROOTS:
+            continue
+        for module in _module_level_imports(py_file):
+            assert not module.startswith("adapters"), (
+                f"{py_file.relative_to(ROOT)} imports {module!r} at module "
+                "level — depend on orchestrator.ports instead")
+
+
+def test_concrete_adapters_satisfy_the_ports():
+    """Structural typing, checked mechanically: every method a port
+    names exists on the adapter that is injected for it."""
+    import inspect
+    from adapters import deploy
+    from adapters.repo_host import GitHubRepoHost
+    from adapters.store_client import DeliveryStore
+    from orchestrator import ports
+
+    def names(proto):
+        return {n for n, v in vars(proto).items()
+                if callable(v) and not n.startswith("_")}
+
+    assert names(ports.RepoHost) <= set(dir(GitHubRepoHost))
+    assert names(ports.Store) <= set(dir(DeliveryStore))
+    assert names(ports.Deployer) <= {n for n, _ in inspect.getmembers(deploy)}
+
+
 def test_workflow_covers_every_definition_step():
     """The executing ADK Workflow must have a node for every per-item
     definition step — the graph IS the per-item execution path now, so a

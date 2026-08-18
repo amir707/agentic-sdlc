@@ -26,6 +26,7 @@ class Recorder:
             policy=lambda step: {"deploy_confidence_minutes": 10})
         self.board = SimpleNamespace(begin=lambda *a, **k: None,
                                      finish=lambda *a, **k: None)
+        self.resolver_store = None  # a port: no module patching needed
         self.decided: list[int] = []
 
 
@@ -34,8 +35,6 @@ def stubs(monkeypatch):
     async def resolver_run(project, store):
         return None
     monkeypatch.setattr(rwf.incident_resolver, "run", resolver_run)
-    monkeypatch.setattr(rwf.DeliveryStore, "for_resolver",
-                        staticmethod(lambda: None))
 
     async def release_queue(ctx):
         return ctx._queue
