@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import driver
+from orchestrator import steps
 from orchestrator.dependency_graph import UnparseableSource
 from adapters.adk import workflow as wf
 from adapters.adk.executor import run_item_workflow
@@ -74,14 +74,14 @@ def stubs(monkeypatch):
     async def open_pr(ctx, item, branch):
         return 42
 
-    monkeypatch.setattr(driver, "run_coder", run_coder)
-    monkeypatch.setattr(driver, "open_pr", open_pr)
-    monkeypatch.setattr(driver, "review_already_approved", lambda ctx, pr: False)
-    monkeypatch.setattr(driver, "review_once",
+    monkeypatch.setattr(steps, "run_coder", run_coder)
+    monkeypatch.setattr(steps, "open_pr", open_pr)
+    monkeypatch.setattr(steps, "review_already_approved", lambda ctx, pr: False)
+    monkeypatch.setattr(steps, "review_once",
                         _async_return(_verdict("approve")))
-    monkeypatch.setattr(driver, "verify_once", _async_return(Verified()))
-    monkeypatch.setattr(driver, "run_preprod_ci", _async_return(True))
-    monkeypatch.setattr(driver, "run_approver", _async_return(0))
+    monkeypatch.setattr(steps, "verify_once", _async_return(Verified()))
+    monkeypatch.setattr(steps, "run_preprod_ci", _async_return(True))
+    monkeypatch.setattr(steps, "run_approver", _async_return(0))
     monkeypatch.setattr(wf, "check_decision",
                         _async_return(SimpleNamespace(
                             kind="approve", author="amir707", reason="",
@@ -122,7 +122,7 @@ def test_happy_path_reaches_queued(stubs):
 
 def test_review_changes_then_approve_loops_and_queues(stubs, monkeypatch):
     seq = iter([_verdict("request_changes"), _verdict("approve")])
-    monkeypatch.setattr(driver, "review_once",
+    monkeypatch.setattr(steps, "review_once",
                         lambda *a, **k: _wrap(next(seq)))
     ctx = Recorder()
     outcome = _run(ctx)
@@ -131,7 +131,7 @@ def test_review_changes_then_approve_loops_and_queues(stubs, monkeypatch):
 
 
 def test_review_exhausted_escalates(stubs, monkeypatch):
-    monkeypatch.setattr(driver, "review_once",
+    monkeypatch.setattr(steps, "review_once",
                         lambda *a, **k: _wrap(_verdict("request_changes")))
     ctx = Recorder()
     outcome = _run(ctx)
@@ -140,19 +140,19 @@ def test_review_exhausted_escalates(stubs, monkeypatch):
 
 
 def test_out_of_scope_rejects(stubs, monkeypatch):
-    monkeypatch.setattr(driver, "review_once",
+    monkeypatch.setattr(steps, "review_once",
                         lambda *a, **k: _wrap(_verdict("out_of_scope")))
     ctx = Recorder()
     assert _run(ctx).kind == "rejected"
 
 
 def test_impasse_escalates(stubs, monkeypatch):
-    monkeypatch.setattr(driver, "review_once",
+    monkeypatch.setattr(steps, "review_once",
                         lambda *a, **k: _wrap(_verdict("request_changes")))
 
     async def no_change_fix(ctx, item, branch, feedback=None):
         return (True, "impl") if feedback is None else (False, "I disagree")
-    monkeypatch.setattr(driver, "run_coder", no_change_fix)
+    monkeypatch.setattr(steps, "run_coder", no_change_fix)
     ctx = Recorder()
     assert _run(ctx).kind == "escalated"
 
@@ -165,27 +165,27 @@ def test_unparseable_review_then_fix_queues(stubs, monkeypatch):
         if calls["n"] == 1:
             raise UnparseableSource("app/x.py", "'{' was never closed (line 1)")
         return _wrap(_verdict("approve"))
-    monkeypatch.setattr(driver, "review_once", review)
+    monkeypatch.setattr(steps, "review_once", review)
     ctx = Recorder()
     assert _run(ctx).kind == "queued"
 
 
 def test_verify_flag_then_ok_queues(stubs, monkeypatch):
     seq = iter([Verified(needs_flag=True), Verified(needs_flag=False)])
-    monkeypatch.setattr(driver, "verify_once", lambda *a, **k: _wrap(next(seq)))
+    monkeypatch.setattr(steps, "verify_once", lambda *a, **k: _wrap(next(seq)))
     ctx = Recorder()
     assert _run(ctx).kind == "queued"
 
 
 def test_verify_flag_exhausted_escalates(stubs, monkeypatch):
-    monkeypatch.setattr(driver, "verify_once",
+    monkeypatch.setattr(steps, "verify_once",
                         lambda *a, **k: _wrap(Verified(needs_flag=True)))
     ctx = Recorder()
     assert _run(ctx).kind == "escalated"
 
 
 def test_preprod_failure_fails(stubs, monkeypatch):
-    monkeypatch.setattr(driver, "run_preprod_ci", _async_return(False))
+    monkeypatch.setattr(steps, "run_preprod_ci", _async_return(False))
     ctx = Recorder()
     outcome = _run(ctx)
     assert outcome.kind == "failed"
