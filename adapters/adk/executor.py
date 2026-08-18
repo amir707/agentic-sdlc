@@ -20,6 +20,7 @@ from google.adk.runners import InMemoryRunner
 from google.genai import types
 
 from adapters.adk.workflow import build_item_workflow
+from mcp_server.vocab import ItemStatus
 from orchestrator.executor import ItemOutcome
 
 _APP_NAME = "agentic_sdlc"
@@ -105,7 +106,7 @@ async def run_item_workflow(ctx, item: dict, branch: str,
         if interrupt is None:
             # Neither a terminal nor a suspend: the graph stalled. Treat
             # as an escalation rather than silently succeeding.
-            return ItemOutcome(kind="escalated", pr=existing_pr)
+            return ItemOutcome(kind=ItemStatus.ESCALATED, pr=existing_pr)
 
         pr = _pr_from_interrupt(interrupt)
         if budget <= 0:

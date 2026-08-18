@@ -12,6 +12,7 @@ Plain forward progress (in_review -> verified -> ...) stays a bare
 `ctx.set_status` — there is nothing to record beyond the status itself.
 """
 
+from mcp_server.vocab import ItemStatus
 from orchestrator.rejection import Rejection, reject
 
 
@@ -25,7 +26,7 @@ async def escalate(ctx, item: dict, pr: int | None, actor: str, rule: str,
     if error is not None:
         factors["error"] = error
     await ctx.audit(actor, "escalate_to_human", factors)
-    await ctx.set_status(item["id"], "escalated", pr)
+    await ctx.set_status(item["id"], ItemStatus.ESCALATED, pr)
     ctx.board.finish(item["id"], note or "escalated")
     print(f"[{item['id']}] escalated to human: {rule}", flush=True)
 
@@ -37,7 +38,7 @@ async def bounce(ctx, item: dict, rejection: Rejection, actor: str) -> None:
     the item (status=rejected)."""
     await reject(ctx.store, ctx.repo_host, rejection, actor=actor)
     if rejection.return_to != "coder":
-        await ctx.set_status(item["id"], "rejected", rejection.pr)
+        await ctx.set_status(item["id"], ItemStatus.REJECTED, rejection.pr)
 
 
 async def fail(ctx, item: dict, pr: int, actor: str, rule: str,
@@ -51,7 +52,7 @@ async def fail(ctx, item: dict, pr: int, actor: str, rule: str,
     if error is not None:
         factors["error"] = error
     await ctx.audit(actor, "hold_merge", factors)
-    await ctx.set_status(item["id"], "failed", pr)
+    await ctx.set_status(item["id"], ItemStatus.FAILED, pr)
     print(f"[{item['id']}] BLOCKED PR #{pr}: {rule}", flush=True)
 
 

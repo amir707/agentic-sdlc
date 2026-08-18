@@ -27,6 +27,7 @@ from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
 
 from mcp_server import db
+from mcp_server.vocab import ItemStatus
 
 # Local trust rung binds loopback; a cloud deployment sets
 # DELIVERY_STORE_HOST=0.0.0.0 and Cloud Run injects PORT.
@@ -73,11 +74,9 @@ def set_item_status(item_id: str, status: str, pr: int | None = None) -> dict:
     """Record an item's lifecycle transition (and its PR, once known).
     The orchestrator resumes from THIS status — never from GitHub."""
     _require("agents")
-    allowed = ("pending", "in_review", "verified", "preprod_passed",
-               "awaiting_approval", "queued", "released", "rejected",
-               "escalated", "failed")
-    if status not in allowed:
-        raise ValueError(f"status must be one of {allowed}")
+    if status not in {s.value for s in ItemStatus}:
+        raise ValueError(
+            f"status must be one of {[s.value for s in ItemStatus]}")
     with db.connect() as conn:
         item = db.set_item_status(conn, item_id, status, pr)
     if item is None:

@@ -20,20 +20,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from mcp_server import db                      # noqa: E402
+from mcp_server.vocab import STATUS_LABELS, ItemStatus  # noqa: E402
 from orchestrator.activity import read_board, read_recent_history  # noqa: E402
 
-_LABELS = {
-    "pending": "not started",
-    "in_review": "in review",
-    "verified": "verified (labels applied)",
-    "preprod_passed": "preprod passed",
-    "awaiting_approval": "awaiting gate decision (/approve on the PR)",
-    "queued": "approved — queued for release",
-    "released": "MERGED + released",
-    "rejected": "rejected",
-    "escalated": "escalated to a human",
-    "failed": "failed preprod",
-}
+_LABELS = STATUS_LABELS
 
 
 def section(title: str) -> None:
@@ -181,7 +171,7 @@ def _item_line(row: dict, board: dict | None) -> str:
     current = (board or {}).get("current", {})
     # A terminal store status outranks a leftover NOW entry (a crashed
     # or path-skipping run can leave the board stale; the store cannot).
-    if row["status"] in ("released", "rejected") and row["id"] in current:
+    if ItemStatus(row["status"]).is_terminal and row["id"] in current:
         current = {}
     if row["id"] in current:
         entry = current[row["id"]]

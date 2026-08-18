@@ -27,6 +27,7 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
+from mcp_server.vocab import STATUS_LABELS, ItemStatus
 from orchestrator import governance, steps
 from orchestrator.gate import check_decision
 
@@ -56,7 +57,8 @@ EDGE_TABLE: list[tuple[str, str, str | None]] = [
 ]
 
 # The four terminal nodes; their JSON `outcome` is the executor's result.
-TERMINALS = ("queued", "rejected", "failed", "escalated")
+TERMINALS = (ItemStatus.QUEUED, ItemStatus.REJECTED, ItemStatus.FAILED,
+             ItemStatus.ESCALATED)
 
 
 def build_item_workflow(ctx, item: dict, branch: str,
@@ -74,18 +76,15 @@ def build_item_workflow(ctx, item: dict, branch: str,
                    "verified": None, "gate_baseline": 0, "gate_tries": 0,
                    "gate_ignores": set()}
 
-    def _terminal(kind: str) -> dict:
-        ctx.board.finish(item["id"], {
-            "queued": "queued for release", "rejected": "rejected",
-            "failed": "failed preprod",
-            "escalated": "escalated to a human"}[kind])
+    def _terminal(kind: ItemStatus) -> dict:
+        ctx.board.finish(item["id"], STATUS_LABELS[kind])
         return {"outcome": kind, "pr": state["pr"]}
 
     async def coder(node_input):
         if state["pr"] is None:                      # fresh item
             await steps.run_coder(ctx, item, branch)
             state["pr"] = await steps.open_pr(ctx, item, branch)
-            await ctx.set_status(item["id"], "in_review", state["pr"])
+            await ctx.set_status(item["id"], ItemStatus.IN_REVIEW, state["pr"])
         return Event(output=state["pr"])
 
     max_reviews = int(flow["max_fix_iterations"])
@@ -179,7 +178,7 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
         state["verified"] = result
         if not result.needs_flag:
-            await ctx.set_status(item["id"], "verified", state["pr"])
+            await ctx.set_status(item["id"], ItemStatus.VERIFIED, state["pr"])
             return Event(output=result.title_prefix, route="labeled")
         if state["flag_fixes"] >= max_flag_fixes:
             await governance.escalate(
@@ -213,15 +212,15 @@ def build_item_workflow(ctx, item: dict, branch: str,
             ok = await steps.run_preprod_ci(ctx, item, state["pr"],
                                              state["verified"])
         if ok:
-            await ctx.set_status(item["id"], "preprod_passed", state["pr"])
+            await ctx.set_status(item["id"], ItemStatus.PREPROD_PASSED, state["pr"])
             return Event(output=ok, route="passed")
-        await ctx.set_status(item["id"], "failed", state["pr"])
+        await ctx.set_status(item["id"], ItemStatus.FAILED, state["pr"])
         return Event(output=ok, route="failed")
 
     async def approver(node_input):
         state["gate_baseline"] = await steps.run_approver(
             ctx, item, state["pr"], state["verified"])
-        await ctx.set_status(item["id"], "awaiting_approval", state["pr"])
+        await ctx.set_status(item["id"], ItemStatus.AWAITING_APPROVAL, state["pr"])
         return Event(output="dossier posted")
 
     async def approval_gate(node_input):
@@ -260,17 +259,17 @@ def build_item_workflow(ctx, item: dict, branch: str,
         # release pass reads status=queued, so setting it here is all the
         # hand-off the release loop needs. The driver runs a release pass
         # after the executor returns.
-        await ctx.set_status(item["id"], "queued", state["pr"])
-        return _terminal("queued")
+        await ctx.set_status(item["id"], ItemStatus.QUEUED, state["pr"])
+        return _terminal(ItemStatus.QUEUED)
 
     def rejected(node_input):
-        return _terminal("rejected")
+        return _terminal(ItemStatus.REJECTED)
 
     def failed(node_input):
-        return _terminal("failed")
+        return _terminal(ItemStatus.FAILED)
 
     def escalated(node_input):
-        return _terminal("escalated")
+        return _terminal(ItemStatus.ESCALATED)
 
     nodes = {"coder": coder, "code_reviewer": code_reviewer,
              "coder_fix": coder_fix, "verify": verify,
