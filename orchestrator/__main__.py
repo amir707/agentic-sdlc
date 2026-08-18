@@ -1,64 +1,26 @@
 """Entry point: python -m orchestrator --project <name>"""
 
-import argparse
-import asyncio
-import sys
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-ROOT = Path(__file__).resolve().parent.parent
+from orchestrator import bootstrap
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the governed SDLC.")
-    parser.add_argument("--project", required=True)
-    parser.add_argument(
+    p = bootstrap.parser("Run the governed SDLC.")
+    p.add_argument(
         "--parallel", type=int, default=1, metavar="N",
         help="run up to N coders concurrently, each in its own git "
              "worktree (default 1: sequential, per ADR-0003)")
-    parser.add_argument("--debug", action="store_true",
-                        help="show full tracebacks instead of one-line "
-                             "failure summaries")
-    args = parser.parse_args()
+    args = p.parse_args()
+    bootstrap.load_env(args.project)
+    bootstrap.announce_models()
 
-    # Engine secrets first, then the project's own.
-    load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / "projects-config" / args.project / ".env")
-
-    from adapters.adk.invoker import ADKInvoker
-    from adapters.adk.executor import ADKPipelineExecutor
-    from adapters.adk.release_workflow import ADKReleaseExecutor
-    from orchestrator.config import load_project
-    from orchestrator.context import build_context
     from orchestrator.sprint import run_pipeline
-
-    # Composition root: the ONLY place a framework is chosen (ADR-0007).
-    import os
-    print("[orchestrator] models: "
-          f"coder={os.environ.get('CODER_MODEL', 'anthropic/claude-sonnet-5')} | "
-          f"reviewer={os.environ.get('REVIEWER_MODEL') or os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')} | "
-          f"gemini-default={os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}",
-          flush=True)
-    project = load_project(args.project)
-    ctx = build_context(project, invoker=ADKInvoker(),
-                        executor=ADKPipelineExecutor(),
-                        release_executor=ADKReleaseExecutor())
-    try:
-        asyncio.run(run_pipeline(ctx, parallel=args.parallel))
-    except KeyboardInterrupt:
-        print("\n[orchestrator] interrupted — progress is in the store; "
-              "rerunning resumes", file=sys.stderr)
-        sys.exit(130)
-    except Exception as exc:  # noqa: BLE001 — top level: summarize
-        if args.debug:
-            raise
-        from orchestrator.errors import one_line
-        print(f"\n[orchestrator] FAILED: {one_line(exc)}", file=sys.stderr)
-        print("[orchestrator] progress is checkpointed in the store — "
-              "rerunning resumes; --debug for the full traceback",
-              file=sys.stderr)
-        sys.exit(1)
+    ctx = bootstrap.sprint_context(args.project)
+    bootstrap.run_cli(
+        run_pipeline(ctx, parallel=args.parallel), label="orchestrator",
+        interrupted="progress is in the store; rerunning resumes",
+        failed_hint="progress is checkpointed in the store — rerunning "
+                    "resumes; --debug for the full traceback",
+        debug=args.debug)
 
 
 if __name__ == "__main__":

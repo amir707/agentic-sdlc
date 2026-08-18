@@ -14,14 +14,10 @@ spurious triggers are harmless (idempotent pass over durable state).
 
 import os
 
-from adapters.adk.invoker import ADKInvoker
 from adapters.adk.release_workflow import build_release_workflow
-from orchestrator.config import load_project
-from orchestrator.context import build_context
+from orchestrator import bootstrap
 
-_project = load_project(os.environ["PROJECT"])
 # Provisions the working checkout at startup (clone + venv) — a resident
 # service pays this once, then every event reuses the warm checkout.
-_ctx = build_context(_project, invoker=ADKInvoker())
-
+_ctx = bootstrap.release_context(os.environ["PROJECT"])
 root_agent = build_release_workflow(_ctx)

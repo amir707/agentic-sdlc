@@ -1,4 +1,4 @@
-"""RunContext: the wiring one run carries, built by a composition root.
+"""RunContext: the handles one run carries (built by orchestrator/bootstrap.py).
 
 Coordination is through the store and artifacts, never in memory: the
 PR is the artifact between coder and reviewer; the store is the
@@ -9,7 +9,6 @@ composition root injects.
 """
 
 import asyncio
-import os
 from dataclasses import dataclass, field
 
 from orchestrator.activity import ActivityBoard
@@ -65,37 +64,3 @@ class RunContext:
         from this, never from GitHub (the PR is only the artifact)."""
         await self.store.call("set_item_status", item_id=item_id,
                               status=status, pr=pr)
-
-
-def build_context(project: ProjectConfig, invoker: AgentInvoker,
-                  executor: PipelineExecutor | None = None,
-                  release_executor: ReleaseExecutor | None = None
-                  ) -> RunContext:
-    """The invoker and executors arrive from a composition root
-    (__main__ or release.py), the only files that choose a framework
-    (ADR-0007). Each entry point injects only what it runs: release.py
-    leaves the per-item executor None. The working checkout is
-    PROVISIONED by the engine itself (cloned into scratch, healed if
-    missing) — no pre-existing local copy is required."""
-    # Composition-root wiring: the ONLY place in orchestrator/ that names
-    # a concrete adapter (moves to a bootstrap module with the entry
-    # points' argparse/env boilerplate next).
-    from adapters import deploy
-    from adapters.repo_host import GitHubRepoHost
-    from adapters.store_client import DeliveryStore
-    from orchestrator import provisioning
-
-    repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
-    workspace = provisioning.provision(
-        project.name, repo_host.authenticated_remote())
-    return RunContext(
-        project=project,
-        store=DeliveryStore.for_agents(),
-        repo_host=repo_host,
-        invoker=invoker,
-        workspace=workspace,
-        executor=executor,
-        release_executor=release_executor,
-        deployer=deploy,
-        resolver_store=DeliveryStore.for_resolver(),
-    )
