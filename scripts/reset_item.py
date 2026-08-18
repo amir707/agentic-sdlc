@@ -13,6 +13,13 @@ empty PR. `make reset-demo` is the true world replay.
 
 Usage: make reset-item ITEM=PAY-102
        (python scripts/reset_item.py --item PAY-102 [--with-assessment])
+
+Trust note: this writes the SQLite file directly (mcp_server.db), not
+through the MCP tool surface, so it is not gated by a role token. That
+is deliberate: it needs file access to the store host, which already
+outranks bearer roles, and it only ever APPENDS to the audit trail (an
+'operator/reset_item' row) — the append-only invariant holds. Anything
+that must be role-scoped goes through the store's tools, never here.
 """
 
 import argparse

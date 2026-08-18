@@ -249,8 +249,9 @@ async def status_report(request):
     lives here. Read-only; any valid role token passes the middleware."""
     from starlette.responses import PlainTextResponse
 
-    from scripts.store_status import report
-    return PlainTextResponse(report())
+    from mcp_server.report import render
+    with db.connect() as conn:
+        return PlainTextResponse(render(conn))
 
 
 @mcp.custom_route("/state", methods=["GET"])
