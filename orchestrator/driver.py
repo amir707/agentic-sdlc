@@ -23,73 +23,28 @@ import os
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 
-from orchestrator.config import ProjectConfig
+from adapters import deploy
+from adapters.repo_host import RepoHostError
+from adapters.store_client import DeliveryStore
+from orchestrator import schemas
+from orchestrator.context import RunContext, build_context  # noqa: F401 (re-exported for entry points)
 from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
                                            build_import_graph)
-from tools.diff_analysis import files_touched
-from orchestrator.activity import ActivityBoard
 from orchestrator.gate import Decision, check_decision, parse_command
-from orchestrator.invoker import AgentInvoker, Invocation
-from orchestrator.executor import PipelineExecutor, ReleaseExecutor
 from orchestrator.json_util import extract_json
-from orchestrator import schemas
+from orchestrator.pr_markers import find_marker, marker
 from orchestrator.rejection import Rejection, reject
-from adapters.repo_host import GitHubRepoHost, RepoHostError
-from adapters.store_client import DeliveryStore
-from orchestrator.workspace import Workspace, WorkspaceFactory
-from adapters import deploy
+from orchestrator.workspace import WorkspaceFactory
+from tools.diff_analysis import files_touched
 from sdlc_steps import incident_resolver, preprod_ci, sprint_packer, verify as verify_step
 from sdlc_steps.approver import spec as approver_spec
 from sdlc_steps.code_reviewer import spec as reviewer_spec
 from sdlc_steps.coder import spec as coder_spec
 from sdlc_steps.release_manager import spec as rm_spec
 from sdlc_steps.risk_assessor import spec as assessor_spec
-
-
-@dataclass
-class RunContext:
-    project: ProjectConfig
-    store: DeliveryStore
-    repo_host: GitHubRepoHost
-    invoker: AgentInvoker
-    workspace: Workspace
-    # The two ADR-0007 execution ports, injected by the composition root
-    # (None only in unit tests that never run them): the per-item pipeline
-    # and the release pass — separate Workflows, separate clocks.
-    executor: PipelineExecutor | None = None
-    release_executor: ReleaseExecutor | None = None
-    # Concurrent preprod deploys against ONE Cloud Run service would
-    # fight over revision creation; CI is the one per-item stage that
-    # must queue even when coders run in parallel.
-    ci_lock: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(1))
-    # Live "who is doing what, since when" (rendered by make watch).
-    board: ActivityBoard = field(default_factory=ActivityBoard)
-    # Release passes are serialized: with --parallel, two gate approvals
-    # must not run two release managers over the same queue at once.
-    release_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    async def invoke(self, spec, message: str) -> Invocation:
-        """Every invocation is metered: token spend is sprint capacity."""
-        result = await self.invoker.invoke(spec, message)
-        await self.store.call(
-            "record_token_usage", agent=spec.name, model=spec.model,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens)
-        return result
-
-    async def audit(self, actor: str, decision: str, factors: dict) -> None:
-        await self.store.call("append_audit", actor=actor,
-                              decision=decision, factors=factors)
-
-    async def set_status(self, item_id: str, status: str,
-                         pr: int | None = None) -> None:
-        """Item lifecycle lives in the STORE; the orchestrator resumes
-        from this, never from GitHub (the PR is only the artifact)."""
-        await self.store.call("set_item_status", item_id=item_id,
-                              status=status, pr=pr)
 
 
 async def _escalation_override(ctx: "RunContext", item: dict,
@@ -113,21 +68,6 @@ async def _escalation_override(ctx: "RunContext", item: dict,
             return None  # command predates the escalation: stale
         kind, reason = parsed
         return Decision(kind=kind, author=comment["author"], reason=reason)
-    return None
-
-
-def _marker(kind: str, sha: str, extra: str = "") -> str:
-    """Idempotency stamp for bot comments (invisible in the GitHub UI).
-    Keyed to the head SHA: a new commit naturally invalidates it, so a
-    restarted run repeats a stage only when the code actually changed."""
-    suffix = f":{extra}" if extra else ""
-    return f"<!-- agentic-sdlc:{kind}:{sha}{suffix} -->"
-
-
-def _find_marker(comments: list[dict], marker: str) -> int | None:
-    for index, comment in enumerate(comments):
-        if marker in comment["body"]:
-            return index
     return None
 
 
@@ -301,7 +241,7 @@ async def review_once(ctx: RunContext, item: dict, pr: int,
         "<sub>automated reviewer agent verdict; NOT the human gate — "
         "that is the /approve decision on the dossier</sub>\n\n"
         f"{verdict.reasoning}\n\n{findings}\n\n"
-        f"{_marker('review', sha, verdict.verdict)}"))
+        f"{marker('review', sha, verdict.verdict)}"))
     return verdict
 
 
@@ -353,7 +293,7 @@ def review_already_approved(ctx: RunContext, pr: int) -> bool:
     duplicate review on a re-run (G5)."""
     sha = ctx.repo_host.get_pr(pr)["head_sha"]
     comments = ctx.repo_host.get_review_threads(pr)
-    return _find_marker(comments, _marker("review", sha, "approve")) is not None
+    return find_marker(comments, marker("review", sha, "approve")) is not None
 
 
 async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
@@ -361,7 +301,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
     # Resume idempotency: this head commit may already be deployed+smoked.
     sha = ctx.repo_host.get_pr(pr)["head_sha"]
     comments = ctx.repo_host.get_review_threads(pr)
-    if _find_marker(comments, _marker("ci", sha, "passed")) is not None:
+    if find_marker(comments, marker("ci", sha, "passed")) is not None:
         print(f"[resume] PR #{pr}: preprod already passed for {sha[:7]} — "
               "skipping", flush=True)
         return True
@@ -383,7 +323,7 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
         return False
     ctx.repo_host.post_comment(pr, (
         preprod_ci.format_comment(ci) + "\n\n"
-        + _marker("ci", sha, "passed" if ci.passed else "failed")))
+        + marker("ci", sha, "passed" if ci.passed else "failed")))
     if ci.preprod_url:
         await ctx.store.call("record_deploy", pr=pr,
                              revision=ci.revision_tag, traffic="preprod",
@@ -403,7 +343,7 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     # decision the human made before the restart is still honored.
     sha = ctx.repo_host.get_pr(pr)["head_sha"]
     comments = ctx.repo_host.get_review_threads(pr)
-    existing = _find_marker(comments, _marker("dossier", sha))
+    existing = find_marker(comments, marker("dossier", sha))
     if existing is not None:
         print(f"[resume] PR #{pr}: dossier already posted for {sha[:7]} — "
               "reusing", flush=True)
@@ -427,7 +367,7 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     approvers = ctx.project.policy("approver")["approvers"]
     ctx.repo_host.post_comment(pr, (
         schemas.render_dossier(dossier, approvers)
-        + "\n\n" + _marker("dossier", sha)))
+        + "\n\n" + marker("dossier", sha)))
     await ctx.audit("approver", "post_dossier", {"pr": pr})
     # The gate baseline is captured HERE, at dossier-post time: a human
     # who decides on GitHub before the gate first looks must be seen.
@@ -535,7 +475,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
               "— escalated", flush=True)
         return "escalated"
     comments = ctx.repo_host.get_review_threads(pr)
-    if _find_marker(comments, _marker("ci", head, "passed")) is None:
+    if find_marker(comments, marker("ci", head, "passed")) is None:
         print(f"[release] PR #{pr}: head {head[:7]} has no passing preprod "
               "— deploying it now", flush=True)
         async with ctx.ci_lock:
@@ -893,29 +833,3 @@ HANDLERS = {
     "incident_resolver": incident_resolver.run,
     "release_manager": run_release_pass,
 }
-
-
-def build_context(project: ProjectConfig, invoker: AgentInvoker,
-                  executor: PipelineExecutor | None = None,
-                  release_executor: ReleaseExecutor | None = None
-                  ) -> RunContext:
-    """The invoker and executors arrive from a composition root
-    (__main__ or release.py), the only files that choose a framework
-    (ADR-0007). Each entry point injects only what it runs: release.py
-    leaves the per-item executor None. The working checkout is
-    PROVISIONED by the engine itself (cloned into scratch, healed if
-    missing) — no pre-existing local copy is required."""
-    from orchestrator import provisioning
-
-    repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
-    workspace = provisioning.provision(
-        project.name, repo_host.authenticated_remote())
-    return RunContext(
-        project=project,
-        store=DeliveryStore.for_agents(),
-        repo_host=repo_host,
-        invoker=invoker,
-        workspace=workspace,
-        executor=executor,
-        release_executor=release_executor,
-    )

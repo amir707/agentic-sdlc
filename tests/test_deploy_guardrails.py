@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from adapters import deploy
-from orchestrator import driver
+from orchestrator import driver, pr_markers
 from sdlc_steps import preprod_ci
 
 
@@ -113,7 +113,7 @@ def test_promote_failure_after_merge_escalates_not_crashes(monkeypatch):
     escalate the item with a manual-promote instruction — never kill the
     release pass after a merge."""
     sha = "a" * 40
-    marker = driver._marker("ci", sha, "passed")
+    marker = pr_markers.marker("ci", sha, "passed")
 
     class Verified:
         needs_flag = False
