@@ -83,6 +83,7 @@ def test_repo_host_error_escalates_the_item_not_the_pass():
 
     class Ctx:
         repo_host = ExplodingRepoHost()
+        board = SimpleNamespace(finish=lambda *a, **k: None)
 
         async def audit(self, actor, decision, factors):
             audits.append((actor, decision, factors))
