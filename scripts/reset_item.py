@@ -30,7 +30,7 @@ from mcp_server import db
 from mcp_server.vocab import Actor, Decision                      # noqa: E402
 from orchestrator import provisioning          # noqa: E402
 from orchestrator.config import load_project   # noqa: E402
-from orchestrator.driver import _branch        # noqa: E402
+from orchestrator.steps import branch_for      # noqa: E402
 
 
 def main() -> None:
@@ -49,7 +49,7 @@ def main() -> None:
 
     project = load_project(args.project)
     host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
-    branch = _branch(item)
+    branch = branch_for(item)
 
     # --- GitHub side: PR + branch -------------------------------------
     closed_pr = None
