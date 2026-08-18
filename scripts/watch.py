@@ -55,7 +55,14 @@ def _keys(lines: list[str]) -> list[tuple[str, str]]:
 
 
 def main() -> None:
-    interval = float(sys.argv[1]) if len(sys.argv) > 1 else 5.0
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Live store view: refreshes every N seconds, colorized, "
+                    "changed lines marked. Reads the local SQLite file, or "
+                    "the cloud store's /status when DELIVERY_STORE_URL is set.")
+    parser.add_argument("interval", nargs="?", type=float, default=5.0,
+                        help="refresh period in seconds (default 5)")
+    interval = parser.parse_args().interval
     url = os.environ.get("DELIVERY_STORE_URL")
     target = url.split("//")[-1].split("/")[0] if url else "local sqlite"
     color = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
