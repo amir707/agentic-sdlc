@@ -121,11 +121,12 @@ def build_llm_agent(spec: AgentSpec, meter=None,
             f"{spec.name}: output_schema and tools are mutually exclusive "
             "on LLM agents — tool-using agents return JSON text instead")
 
-    throttle = None
-    if spec.model.startswith("gemini"):
-        async def throttle(callback_context, llm_request):
-            await _gemini_limiter().wait()
-            return None
+    async def _throttle(callback_context, llm_request):
+        await _gemini_limiter().wait()
+        return None
+    # Only Gemini needs pacing (per-project free-tier RPM); other
+    # providers get no before_model_callback.
+    throttle = _throttle if spec.model.startswith("gemini") else None
 
     return LlmAgent(
         name=spec.name,
