@@ -130,11 +130,11 @@ def test_promote_failure_after_merge_escalates_not_crashes(monkeypatch):
     def promote_boom(tag):
         raise deploy.DeployError("command failed (exit 1): gcloud ... "
                                  "— gcloud said: UNAVAILABLE")
-    monkeypatch.setattr(deploy, "promote", promote_boom)
 
     audits, statuses = [], []
 
     class Ctx:
+        deployer = SimpleNamespace(promote=promote_boom)  # the port, faked
         repo_host = SimpleNamespace(
             get_pr=lambda pr: {"head_sha": sha, "head_ref": "b"},
             get_review_threads=lambda pr: [{"body": marker}],

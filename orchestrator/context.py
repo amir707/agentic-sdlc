@@ -12,20 +12,19 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 
-from adapters.repo_host import GitHubRepoHost
-from adapters.store_client import DeliveryStore
 from orchestrator.activity import ActivityBoard
 from orchestrator.config import ProjectConfig
 from orchestrator.executor import PipelineExecutor, ReleaseExecutor
 from orchestrator.invoker import AgentInvoker, Invocation
+from orchestrator.ports import Deployer, RepoHost, Store
 from orchestrator.workspace import Workspace
 
 
 @dataclass
 class RunContext:
     project: ProjectConfig
-    store: DeliveryStore
-    repo_host: GitHubRepoHost
+    store: Store                 # agents-role handle
+    repo_host: RepoHost
     invoker: AgentInvoker
     workspace: Workspace
     # The two ADR-0007 execution ports, injected by the composition root
@@ -33,6 +32,10 @@ class RunContext:
     # and the release pass — separate Workflows, separate clocks.
     executor: PipelineExecutor | None = None
     release_executor: ReleaseExecutor | None = None
+    # The traffic-shift tool (release) and the resolver-role store handle
+    # (incident hygiene before a sprint / release pass) — ports too.
+    deployer: Deployer | None = None
+    resolver_store: Store | None = None
     # Concurrent preprod deploys against ONE Cloud Run service would
     # fight over revision creation; CI is the one per-item stage that
     # must queue even when coders run in parallel.
@@ -74,6 +77,12 @@ def build_context(project: ProjectConfig, invoker: AgentInvoker,
     leaves the per-item executor None. The working checkout is
     PROVISIONED by the engine itself (cloned into scratch, healed if
     missing) — no pre-existing local copy is required."""
+    # Composition-root wiring: the ONLY place in orchestrator/ that names
+    # a concrete adapter (moves to a bootstrap module with the entry
+    # points' argparse/env boilerplate next).
+    from adapters import deploy
+    from adapters.repo_host import GitHubRepoHost
+    from adapters.store_client import DeliveryStore
     from orchestrator import provisioning
 
     repo_host = GitHubRepoHost(project.repo, os.environ["GITHUB_TOKEN"])
@@ -87,4 +96,6 @@ def build_context(project: ProjectConfig, invoker: AgentInvoker,
         workspace=workspace,
         executor=executor,
         release_executor=release_executor,
+        deployer=deploy,
+        resolver_store=DeliveryStore.for_resolver(),
     )
