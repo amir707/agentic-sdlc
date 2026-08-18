@@ -27,6 +27,7 @@ from enum import StrEnum
 from mcp_server.vocab import Actor, Decision, ItemStatus
 from orchestrator import governance, steps
 from orchestrator.dependency_graph import UnparseableSource
+from orchestrator.gate import check_decision
 from orchestrator.rejection import Rejection
 from sdlc_steps.verify import VerifyResult
 
@@ -156,3 +157,171 @@ async def coder_fix(ctx, item: dict, branch: str, state: PipelineState,
             "coder declined the requested changes (no-change fix round)")
         return NodeResult("impasse", Route.IMPASSE)
     return NodeResult("fixed", Route.FIXED)
+
+
+# --- verify / flag loop -------------------------------------------------------
+
+def _max_flag_fixes(ctx) -> int:
+    return int(ctx.project.policy("orchestrator")["max_flag_fix_iterations"])
+
+
+_FLAG_FIX = ("Policy violation: this change's verified risk requires the NEW "
+             "behavior to be gated behind a feature flag (default off) in "
+             "flags.json. Wrap it and keep tests covering both flag states.")
+
+
+async def verify(ctx, item: dict, state: PipelineState) -> NodeResult:
+    """One verify pass with the bounded flag loop's policy: labels
+    applied -> LABELED; flag missing -> bounce to the coder while budget
+    remains, else escalate. Unparseable code makes measurement
+    impossible — same bounded rework loop, same route back."""
+    max_flag_fixes = _max_flag_fixes(ctx)
+    try:
+        result = await steps.verify_once(ctx, item, state.pr)
+    except UnparseableSource as broken:
+        if state.flag_fixes >= max_flag_fixes:
+            await governance.escalate(
+                ctx, item, state.pr, Actor.VERIFY,
+                f"code still unparseable after {max_flag_fixes} fix")
+            return NodeResult("unparseable, budget exhausted", Route.ESCALATE)
+        await governance.bounce(ctx, item,
+                                Rejection(state.pr, "code_unparseable", "coder",
+                                          f"the code does not parse: {broken}"),
+                                actor=Actor.VERIFY)
+        state.flag_fixes += 1
+        return NodeResult(_UNPARSEABLE_FIX.format(detail=broken),
+                          Route.POLICY_FLAG_REQUIRED)
+
+    state.verified = result
+    if not result.needs_flag:
+        await ctx.set_status(item["id"], ItemStatus.VERIFIED, state.pr)
+        return NodeResult(result.title_prefix, Route.LABELED)
+    if state.flag_fixes >= max_flag_fixes:
+        await governance.escalate(
+            ctx, item, state.pr, Actor.VERIFY,
+            f"flag still missing after {max_flag_fixes} fix")
+        return NodeResult("flag budget exhausted", Route.ESCALATE)
+    state.flag_fixes += 1
+    await governance.bounce(ctx, item,
+                            Rejection(state.pr, "policy_flag_required", "coder",
+                                      f"verified risk {result.verified_risk} "
+                                      "requires a feature flag; none gates the "
+                                      "new behavior"),
+                            actor=Actor.VERIFY)
+    return NodeResult(_FLAG_FIX, Route.POLICY_FLAG_REQUIRED)
+
+
+async def coder_flag_fix(ctx, item: dict, branch: str, state: PipelineState,
+                         instruction: str) -> NodeResult:
+    """One fix round on the instruction verify chose (flag policy OR a
+    syntax error) — one path serves both, returning to verify."""
+    await steps.run_coder(ctx, item, branch, feedback=instruction)
+    return NodeResult("flagged")
+
+
+# --- preprod / approver / gate -------------------------------------------------
+
+async def preprod_ci(ctx, item: dict, state: PipelineState) -> NodeResult:
+    """Deploy the head to preprod and smoke it. Serialized on ctx.ci_lock:
+    concurrent deploys against ONE Cloud Run service fight over revision
+    creation even when coders run in parallel."""
+    async with ctx.ci_lock:
+        ok = await steps.run_preprod_ci(ctx, item, state.pr, state.verified)
+    if ok:
+        await ctx.set_status(item["id"], ItemStatus.PREPROD_PASSED, state.pr)
+        return NodeResult(ok, Route.PASSED)
+    await ctx.set_status(item["id"], ItemStatus.FAILED, state.pr)
+    return NodeResult(ok, Route.FAILED)
+
+
+async def approver(ctx, item: dict, state: PipelineState) -> NodeResult:
+    """Post the dossier; remember the gate baseline (comment index right
+    after it, so a decision made before the gate first looks is seen)."""
+    state.gate_baseline = await steps.run_approver(
+        ctx, item, state.pr, state.verified)
+    await ctx.set_status(item["id"], ItemStatus.AWAITING_APPROVAL, state.pr)
+    return NodeResult("dossier posted")
+
+
+async def approval_gate(ctx, item: dict, state: PipelineState) -> NodeResult:
+    """ONE authenticated look at the PR (ADR-0005): the decision's
+    authority is the allowlisted GitHub comment, never the resume.
+    APPROVE / REJECT route on; otherwise route is None and the output is
+    the operator-facing wait message — the adapter turns that into a
+    suspend (interrupt id from state.gate_tries) and the next look
+    happens on the next nudge or event."""
+    approvers = ctx.project.policy("approver")["approvers"]
+    decision = await check_decision(
+        ctx.repo_host, ctx.store, state.pr, approvers,
+        state.gate_baseline, state.gate_ignores)
+
+    if decision and decision.kind == "approve":
+        return NodeResult(True, Route.APPROVE)
+    if decision and decision.kind == "reject":
+        await governance.bounce(ctx, item,
+                                Rejection(state.pr, "human_declined", "backlog",
+                                          decision.reason or "no reason given"),
+                                actor=Actor.APPROVAL_GATE)
+        return NodeResult(False, Route.REJECT)
+    if decision:  # hold: advance the baseline past it, keep waiting
+        state.gate_baseline = decision.comment_index + 1
+
+    state.gate_tries += 1
+    held = f" (on hold by {decision.author})" if decision else ""
+    return NodeResult(
+        f"PR #{state.pr} awaits a decision on GitHub{held}: an allowlisted "
+        "approver comments /approve, /reject <reason>, or /hold on the PR. "
+        "Decide there, then reply here (anything) to re-check.")
+
+
+def gate_interrupt_id(state: PipelineState) -> str:
+    """Fresh per suspend so each nudge reruns the gate; the executor
+    parses the PR back out of it (pr_from_gate_interrupt)."""
+    return f"gate_pr{state.pr}_try{state.gate_tries}"
+
+
+def pr_from_gate_interrupt(interrupt_id: str) -> int | None:
+    try:
+        return int(interrupt_id.split("_pr", 1)[1].split("_try", 1)[0])
+    except (IndexError, ValueError):
+        return None
+
+
+async def queued(ctx, item: dict, state: PipelineState) -> None:
+    """The store status IS the release queue: setting it here is the
+    whole hand-off; the sprint flow triggers a release pass after."""
+    await ctx.set_status(item["id"], ItemStatus.QUEUED, state.pr)
+
+
+# --- how long a run waits at the gate -----------------------------------------
+
+@dataclass(frozen=True)
+class GateWait:
+    """The run-level policy for a suspended gate — a WAIT concern, kept
+    apart from the gate's authority model above. Event-triggered
+    services set GATE_WAIT_MINUTES=0: every gate gets exactly one look
+    per event and the run parks the item (awaiting); the next event
+    re-checks. Interactive runs either nudge (operator presses Enter
+    after commenting on GitHub) or poll for up to the budget."""
+    mode: str            # "poll" | "nudge"
+    budget_seconds: float
+    poll_seconds: float
+
+    @classmethod
+    def from_ctx(cls, ctx) -> "GateWait":
+        import os
+        policy = ctx.project.policy("approver")
+        budget = float(os.environ.get("GATE_WAIT_MINUTES")
+                       or policy.get("gate_wait_minutes", 5)) * 60.0
+        return cls(mode=policy.get("gate_mode", "poll"),
+                   budget_seconds=budget,
+                   poll_seconds=float(policy.get("gate_poll_seconds", 10)))
+
+    def next_action(self, waited_seconds: float) -> str:
+        """'park' (return awaiting), 'nudge' (block on operator), or
+        'poll' (sleep poll_seconds and look again)."""
+        if self.budget_seconds <= 0:
+            return "park"
+        if self.mode == "nudge":
+            return "nudge"
+        return "park" if waited_seconds >= self.budget_seconds else "poll"
