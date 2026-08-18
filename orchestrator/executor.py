@@ -18,7 +18,7 @@ class ItemOutcome:
     """Where the per-item pipeline left the item. Lifecycle status and the
     release queue already live in the store / ctx (G3); this is only what
     the driver needs to decide the next move (e.g. run the release pass)."""
-    kind: str            # queued | rejected | failed | escalated | awaiting
+    kind: str            # a terminal ItemStatus (queued | rejected | failed | escalated), or "awaiting" (suspended at the gate)
     pr: int | None
 
 

@@ -17,6 +17,7 @@ import os
 
 from adapters import deploy
 from adapters.repo_host import RepoHostError
+from mcp_server.vocab import ItemStatus
 from orchestrator import governance, schemas
 from orchestrator.context import RunContext
 from orchestrator.dependency_graph import UnparseableSource
@@ -33,7 +34,7 @@ async def release_queue(ctx: RunContext) -> list[dict]:
     them. Workstream B: release is a peer loop over store state."""
     items = await ctx.store.call("list_backlog")
     return [i for i in items
-            if i.get("status") == "queued" and i.get("pr")]
+            if i.get("status") == ItemStatus.QUEUED and i.get("pr")]
 
 
 async def run_release_pass(ctx: RunContext) -> None:
@@ -194,7 +195,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                              revision=f"pr-{pr}", traffic="100",
                              area=verified.primary_area)
         await ctx.audit("release_manager", "merge_pr", factors)
-        await ctx.set_status(item["id"], "released", pr)
+        await ctx.set_status(item["id"], ItemStatus.RELEASED, pr)
         rule = decision.factors.get("dominating_rule", "")
         print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})"
               + (f" — rule: {rule}" if rule else "")

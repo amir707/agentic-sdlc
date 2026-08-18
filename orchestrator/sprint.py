@@ -15,6 +15,7 @@ import sys
 from dataclasses import replace
 
 from adapters.store_client import DeliveryStore
+from mcp_server.vocab import ItemStatus
 from orchestrator import governance
 from orchestrator.context import RunContext
 from orchestrator.gate import Decision, parse_command
@@ -75,17 +76,17 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
 
     # THE STORE decides where this item is in its life — never GitHub
     # (the PR is the artifact; the store is the truth).
-    status = item.get("status") or "pending"
+    status = ItemStatus(item.get("status") or ItemStatus.PENDING)
     pr = item.get("pr")
 
-    if status == "released":
+    if status == ItemStatus.RELEASED:
         print(f"[resume] {item['id']}: already released — nothing to do",
               flush=True)
         return None
-    if status == "rejected":
+    if status == ItemStatus.REJECTED:
         print(f"[resume] {item['id']}: rejected — nothing to do", flush=True)
         return None
-    if status in ("escalated", "failed"):
+    if status.is_parked:
         override = await _escalation_override(ctx, item, pr) if pr else None
         if override is None or override.kind == "hold":
             print(f"[resume] {item['id']}: status={status} — waiting on a "
@@ -105,8 +106,8 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         await ctx.audit("approval_gate", "human_override_escalation", {
             "pr": pr, "item": item["id"], "author": override.author,
             "was_status": status})
-        await ctx.set_status(item["id"], "queued", pr)
-        status = "queued"
+        await ctx.set_status(item["id"], ItemStatus.QUEUED, pr)
+        status = ItemStatus.QUEUED
         print(f"[resume] {item['id']}: escalation overridden by "
               f"{override.author}'s /approve — queued for release "
               "(machine gates re-run)", flush=True)
@@ -132,7 +133,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
         else:
             await run_coder(ctx, item, branch)
             pr = await open_pr(ctx, item, branch)
-        await ctx.set_status(item["id"], "in_review", pr)
+        await ctx.set_status(item["id"], ItemStatus.IN_REVIEW, pr)
     else:
         print(f"[resume] {item['id']}: PR #{pr} at status={status}",
               flush=True)
@@ -157,7 +158,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
             note="merge conflict — human")
         return None
 
-    if status == "queued":
+    if status == ItemStatus.QUEUED:
         # Human approval already given (previous run). The store-sourced
         # release pass re-verifies this head, re-checks the flag policy,
         # and decides — nothing to set up here beyond triggering it (the
@@ -175,7 +176,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     # (the coder node opens it) and set on resume (the coder node skips
     # re-implementation). The STORE carries the results (status=queued),
     outcome = await ctx.executor.run_item(ctx, item, branch, existing_pr=pr)
-    if outcome.kind == "queued":
+    if outcome.kind == ItemStatus.QUEUED:
         # Trickle release: an approval immediately gets a release decision —
         # the pass covers the WHOLE unmerged queue, so earlier holds are
         # reconsidered under the current situation too.
@@ -202,10 +203,10 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
         # A finished sprint stays finished (the invariant above) — but
         # say so, and name the items the packer left out, so a no-op
         # resume never reads as the orchestrator forgetting them.
-        if selected and all(i.get("status") in ("released", "rejected")
+        if selected and all(ItemStatus(i.get("status") or "pending").is_terminal
                             for i in selected):
             leftover = [i["id"] for i in backlog.values()
-                        if (i.get("status") or "pending") == "pending"]
+                        if (i.get("status") or ItemStatus.PENDING) == ItemStatus.PENDING]
             note = (f"; {len(leftover)} backlog items were never packed "
                     f"({', '.join(leftover)}) — run 'make seed' to start "
                     "a new sprint" if leftover else "")
