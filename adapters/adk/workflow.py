@@ -3,8 +3,9 @@
 This is no longer a display-only shadow of an imperative driver: it IS
 the per-item execution path. `orchestrator/definition.py` remains the
 framework-neutral truth (what the pipeline is); this module renders that
-truth as a native ADK graph whose nodes delegate to the SAME single-shot
-handlers the engine owns (run_coder, review_once, verify_once, ...), and
+truth as a native ADK graph whose nodes are one-line wrappers over the
+engine's own node decisions (`orchestrator/pipeline.py`: policy, loop
+budgets, governance outcomes, routes — all framework-free), and
 `adapters/adk/executor.py` runs it on ADK's engine. The definition's
 bounded back-edges become routed cycle edges (ADK rejects unconditional
 cycles); `adk web` can display and step the same graph the runner runs.
@@ -27,10 +28,9 @@ from google.adk.events.event import Event
 from google.adk.events.request_input import RequestInput
 from google.adk.workflow import FunctionNode, Workflow
 
-from mcp_server.vocab import STATUS_LABELS, Actor, ItemStatus
-from orchestrator import governance, pipeline, steps
+from mcp_server.vocab import STATUS_LABELS, ItemStatus
+from orchestrator import pipeline
 from orchestrator.pipeline import PipelineState, Route
-from orchestrator.gate import check_decision
 
 # Name-level edge table (source, target, route|None). Cycle edges carry
 # routes (ADK rejects unconditional cycles) and realize the definition's
@@ -72,7 +72,6 @@ def build_item_workflow(ctx, item: dict, branch: str,
     scaffolding (PR number, iteration counters) lives in a closure;
     durable truth stays in GitHub and the store exactly as before.
     """
-    flow = ctx.project.policy("orchestrator")
     state = PipelineState(pr=existing_pr)
 
     def _terminal(kind: ItemStatus) -> dict:
@@ -92,115 +91,33 @@ def build_item_workflow(ctx, item: dict, branch: str,
         return _event(await pipeline.coder_fix(ctx, item, branch, state,
                                                feedback=str(node_input)))
 
-    max_flag_fixes = int(flow["max_flag_fix_iterations"])
-    _UNPARSEABLE_FIX = pipeline._UNPARSEABLE_FIX
-
     async def verify(node_input):
-        from orchestrator.dependency_graph import UnparseableSource
-        from orchestrator.rejection import Rejection
-        try:
-            result = await steps.verify_once(ctx, item, state.pr)
-        except UnparseableSource as broken:
-            # Measurement is impossible until the code parses; same
-            # bounded rework loop as a missing flag.
-            if state.flag_fixes >= max_flag_fixes:
-                await governance.escalate(
-                    ctx, item, state.pr, Actor.VERIFY,
-                    f"code still unparseable after {max_flag_fixes} fix")
-                return Event(output="unparseable, budget exhausted",
-                             route=Route.ESCALATE)
-            await governance.bounce(ctx, item,
-                         Rejection(state.pr, "code_unparseable", "coder",
-                                   f"the code does not parse: {broken}"),
-                         actor=Actor.VERIFY)
-            state.flag_fixes += 1
-            return Event(output=_UNPARSEABLE_FIX.format(detail=broken),
-                         route=Route.POLICY_FLAG_REQUIRED)
-
-        state.verified = result
-        if not result.needs_flag:
-            await ctx.set_status(item["id"], ItemStatus.VERIFIED, state.pr)
-            return Event(output=result.title_prefix, route=Route.LABELED)
-        if state.flag_fixes >= max_flag_fixes:
-            await governance.escalate(
-                ctx, item, state.pr, Actor.VERIFY,
-                f"flag still missing after {max_flag_fixes} fix")
-            return Event(output="flag budget exhausted", route=Route.ESCALATE)
-        state.flag_fixes += 1
-        await governance.bounce(ctx, item,
-                     Rejection(state.pr, "policy_flag_required", "coder",
-                               f"verified risk {result.verified_risk} "
-                               "requires a feature flag; none gates the new "
-                               "behavior"),
-                     actor=Actor.VERIFY)
-        return Event(output=(
-            "Policy violation: this change's verified risk requires the NEW "
-            "behavior to be gated behind a feature flag (default off) in "
-            "flags.json. Wrap it and keep tests covering both flag states."),
-            route=Route.POLICY_FLAG_REQUIRED)
+        return _event(await pipeline.verify(ctx, item, state))
 
     async def coder_flag_fix(node_input):
-        # node_input is the fix instruction verify chose (flag policy OR
-        # a syntax error) — one fix path serves both, returning to verify.
-        await steps.run_coder(ctx, item, branch, feedback=str(node_input))
-        return Event(output="flagged")
+        return _event(await pipeline.coder_flag_fix(ctx, item, branch, state,
+                                                    instruction=str(node_input)))
 
     async def preprod_ci(node_input):
-        # Concurrent preprod deploys against ONE Cloud Run service fight
-        # over revision creation; serialize them even when coders run in
-        # parallel (same guard the sequential loop held).
-        async with ctx.ci_lock:
-            ok = await steps.run_preprod_ci(ctx, item, state.pr,
-                                             state.verified)
-        if ok:
-            await ctx.set_status(item["id"], ItemStatus.PREPROD_PASSED, state.pr)
-            return Event(output=ok, route=Route.PASSED)
-        await ctx.set_status(item["id"], ItemStatus.FAILED, state.pr)
-        return Event(output=ok, route=Route.FAILED)
+        return _event(await pipeline.preprod_ci(ctx, item, state))
 
     async def approver(node_input):
-        state.gate_baseline = await steps.run_approver(
-            ctx, item, state.pr, state.verified)
-        await ctx.set_status(item["id"], ItemStatus.AWAITING_APPROVAL, state.pr)
-        return Event(output="dossier posted")
+        return _event(await pipeline.approver(ctx, item, state))
 
     async def approval_gate(node_input):
         """Native HITL suspend. The resume is a NUDGE, never a decision:
-        each rerun performs exactly one authenticated look at the PR."""
-        approvers = ctx.project.policy("approver")["approvers"]
-        decision = await check_decision(
-            ctx.repo_host, ctx.store, state.pr, approvers,
-            state.gate_baseline, state.gate_ignores)
-
-        if decision and decision.kind == "approve":
-            yield Event(output=True, route=Route.APPROVE)
+        each rerun performs exactly one authenticated look at the PR
+        (pipeline.approval_gate); no route means 'no decision yet' and
+        the node suspends again under a fresh interrupt id."""
+        look = await pipeline.approval_gate(ctx, item, state)
+        if look.route is not None:
+            yield _event(look)
             return
-        if decision and decision.kind == "reject":
-            from orchestrator.rejection import Rejection
-            await governance.bounce(ctx, item,
-                         Rejection(state.pr, "human_declined", "backlog",
-                                   decision.reason or "no reason given"),
-                         actor=Actor.APPROVAL_GATE)
-            yield Event(output=False, route=Route.REJECT)
-            return
-        if decision:  # hold: advance the baseline past it, keep waiting
-            state.gate_baseline = decision.comment_index + 1
-
-        state.gate_tries += 1
-        held = f" (on hold by {decision.author})" if decision else ""
-        yield RequestInput(
-            interrupt_id=f"gate_pr{state.pr}_try{state.gate_tries}",
-            message=(f"PR #{state.pr} awaits a decision on GitHub"
-                     f"{held}: an allowlisted approver comments /approve, "
-                     "/reject <reason>, or /hold on the PR. Decide there, "
-                     "then reply here (anything) to re-check."))
+        yield RequestInput(interrupt_id=pipeline.gate_interrupt_id(state),
+                           message=str(look.output))
 
     async def queued(node_input):
-        # The store status IS the release queue (Workstream B): the
-        # release pass reads status=queued, so setting it here is all the
-        # hand-off the release loop needs. The driver runs a release pass
-        # after the executor returns.
-        await ctx.set_status(item["id"], ItemStatus.QUEUED, state.pr)
+        await pipeline.queued(ctx, item, state)
         return _terminal(ItemStatus.QUEUED)
 
     def rejected(node_input):

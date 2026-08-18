@@ -13,7 +13,6 @@ owns execution-cursor state only.
 """
 
 import asyncio
-import os
 
 from google.adk.apps import App, ResumabilityConfig
 from google.adk.runners import InMemoryRunner
@@ -22,6 +21,7 @@ from google.genai import types
 from adapters.adk.workflow import build_item_workflow
 from mcp_server.vocab import ItemStatus
 from orchestrator.executor import ItemOutcome
+from orchestrator.pipeline import GateWait, pr_from_gate_interrupt
 
 _APP_NAME = "agentic_sdlc"
 
@@ -39,14 +39,6 @@ def _resume_message(interrupt_id: str) -> types.Content:
         function_response=types.FunctionResponse(
             id=interrupt_id, name="adk_request_input",
             response={"nudge": "recheck"}))])
-
-
-def _pr_from_interrupt(interrupt_id: str) -> int | None:
-    # interrupt ids are "gate_pr{pr}_try{n}" (see workflow.approval_gate).
-    try:
-        return int(interrupt_id.split("_pr", 1)[1].split("_try", 1)[0])
-    except (IndexError, ValueError):
-        return None
 
 
 async def _drive(runner, session_id: str, user_id: str,
@@ -87,14 +79,7 @@ async def run_item_workflow(ctx, item: dict, branch: str,
     session = await runner.session_service.create_session(
         app_name=_APP_NAME, user_id=item["id"])
 
-    policy = ctx.project.policy("approver")
-    mode = policy.get("gate_mode", "poll")
-    # GATE_WAIT_MINUTES env overrides policy: the resident sprint service
-    # sets it to 0 so an EVENT-triggered pass gives every gate exactly one
-    # authenticated look and never waits — the next event re-checks.
-    budget = float(os.environ.get("GATE_WAIT_MINUTES")
-                   or policy.get("gate_wait_minutes", 5)) * 60.0
-    poll = float(policy.get("gate_poll_seconds", 10))
+    wait = GateWait.from_ctx(ctx)
 
     message = _start_message()
     waited = 0.0
@@ -108,27 +93,23 @@ async def run_item_workflow(ctx, item: dict, branch: str,
             # as an escalation rather than silently succeeding.
             return ItemOutcome(kind=ItemStatus.ESCALATED, pr=existing_pr)
 
-        pr = _pr_from_interrupt(interrupt)
-        if budget <= 0:
-            # Event semantics regardless of gate_mode: one look happened
-            # inside the gate node; park and let the next event re-check.
-            print(f"[gate] PR #{pr}: no decision on this look — the item "
-                  "stays awaiting_approval; the next event re-checks",
-                  flush=True)
+        pr = pr_from_gate_interrupt(interrupt)
+        action = wait.next_action(waited)
+        if action == "park":
+            # One look happened inside the gate node; park and let the
+            # next event (or rerun) re-check. The item stays awaiting.
+            why = ("no decision on this look" if wait.budget_seconds <= 0
+                   else f"no decision within {wait.budget_seconds / 60:.0f}m")
+            print(f"[gate] PR #{pr}: {why} — the item stays "
+                  "awaiting_approval; the next event re-checks", flush=True)
             return ItemOutcome(kind="awaiting", pr=pr)
-        if mode == "nudge":
+        if action == "nudge":
             # The decision's authority is the GitHub comment; pressing
             # Enter (like the ADK resume) only triggers one look at it.
             await asyncio.to_thread(
                 input, f"[gate] decide on PR #{pr} via a GitHub comment, "
                        "then press Enter to re-check: ")
         else:
-            if waited >= budget:
-                print(f"[gate] no decision on PR #{pr} within "
-                      f"{budget / 60:.0f}m — releasing this run; the item "
-                      "stays awaiting_approval and any rerun re-checks",
-                      flush=True)
-                return ItemOutcome(kind="awaiting", pr=pr)
-            await asyncio.sleep(poll)
-            waited += poll
+            await asyncio.sleep(wait.poll_seconds)
+            waited += wait.poll_seconds
         message = _resume_message(interrupt)

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import steps
+from orchestrator import pipeline, steps
 from orchestrator.dependency_graph import UnparseableSource
 from adapters.adk import workflow as wf
 from adapters.adk.executor import run_item_workflow
@@ -82,7 +82,7 @@ def stubs(monkeypatch):
     monkeypatch.setattr(steps, "verify_once", _async_return(Verified()))
     monkeypatch.setattr(steps, "run_preprod_ci", _async_return(True))
     monkeypatch.setattr(steps, "run_approver", _async_return(0))
-    monkeypatch.setattr(wf, "check_decision",
+    monkeypatch.setattr(pipeline, "check_decision",
                         _async_return(SimpleNamespace(
                             kind="approve", author="amir707", reason="",
                             comment_index=0)))
@@ -195,7 +195,7 @@ def test_preprod_failure_fails(stubs, monkeypatch):
 # --- the human gate ----------------------------------------------------------
 
 def test_gate_reject_rejects(stubs, monkeypatch):
-    monkeypatch.setattr(wf, "check_decision", _async_return(SimpleNamespace(
+    monkeypatch.setattr(pipeline, "check_decision", _async_return(SimpleNamespace(
         kind="reject", author="amir707", reason="no", comment_index=0)))
     ctx = Recorder()
     assert _run(ctx).kind == "rejected"
@@ -212,7 +212,7 @@ def test_gate_suspends_then_resumes_to_queued(stubs, monkeypatch):
             return None  # suspend
         return SimpleNamespace(kind="approve", author="amir707", reason="",
                                comment_index=0)
-    monkeypatch.setattr(wf, "check_decision", decide)
+    monkeypatch.setattr(pipeline, "check_decision", decide)
     ctx = Recorder()
     outcome = _run(ctx)
     assert outcome.kind == "queued"
@@ -220,7 +220,7 @@ def test_gate_suspends_then_resumes_to_queued(stubs, monkeypatch):
 
 
 def test_gate_budget_exhausted_awaits(stubs, monkeypatch):
-    monkeypatch.setattr(wf, "check_decision", _async_return(None))  # never decides
+    monkeypatch.setattr(pipeline, "check_decision", _async_return(None))  # never decides
     ctx = Recorder()
     ctx._policies["approver"]["gate_wait_minutes"] = 0  # zero budget
     outcome = _run(ctx)
@@ -242,7 +242,7 @@ def test_gate_env_zero_budget_gives_one_look_then_parks(stubs, monkeypatch):
     async def never_decides(*a, **k):
         looks["n"] += 1
         return None
-    monkeypatch.setattr(wf, "check_decision", never_decides)
+    monkeypatch.setattr(pipeline, "check_decision", never_decides)
     monkeypatch.setenv("GATE_WAIT_MINUTES", "0")
     ctx = Recorder(gate="nudge")  # even nudge mode must not touch stdin
     outcome = _run(ctx)
