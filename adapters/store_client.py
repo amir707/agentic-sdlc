@@ -37,13 +37,23 @@ def auth_headers(token: str, url: str) -> dict[str, str]:
     return headers
 
 
+def store_url() -> str:
+    """Where the delivery store is: DELIVERY_STORE_URL for a remote
+    store (Cloud Run, or the gcloud proxy), else the local loopback rung
+    on DELIVERY_STORE_PORT. Every store client resolves through HERE."""
+    port = os.environ.get("DELIVERY_STORE_PORT", "8787")
+    return (os.environ.get("DELIVERY_STORE_URL")
+            or f"http://127.0.0.1:{port}/mcp")
+
+
+def store_base_url() -> str:
+    """The store's origin (for its custom routes: /status, /state)."""
+    return store_url().removesuffix("/mcp").rstrip("/")
+
+
 class DeliveryStore:
     def __init__(self, token: str, url: str | None = None):
-        port = os.environ.get("DELIVERY_STORE_PORT", "8787")
-        # DELIVERY_STORE_URL points at a remote store (e.g. Cloud Run);
-        # default stays the local loopback rung.
-        self.url = (url or os.environ.get("DELIVERY_STORE_URL")
-                    or f"http://127.0.0.1:{port}/mcp")
+        self.url = url or store_url()
         self._token = token
 
     @classmethod
