@@ -22,49 +22,29 @@ Third composition root (with __main__ and release.py): it selects the
 project, loads env, and lets ADK's server own the process lifetime.
 """
 
-import argparse
 import os
-from pathlib import Path
 
-from dotenv import load_dotenv
-
-ROOT = Path(__file__).resolve().parent.parent
+from orchestrator import bootstrap
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Run the resident release manager (event-driven).")
-    parser.add_argument("--project", required=True)
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8788)
-    parser.add_argument("--heartbeat-minutes", type=float, default=5.0,
-                        help="self-wake interval until Scheduler/webhook "
-                             "are wired (0 disables)")
-    args = parser.parse_args()
+    p = bootstrap.parser("Run the resident release manager (event-driven).")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8788)
+    p.add_argument("--heartbeat-minutes", type=float, default=5.0,
+                   help="self-wake interval until Scheduler/webhook are "
+                        "wired (0 disables)")
+    args = p.parse_args()
+    bootstrap.load_env(args.project)
 
-    load_dotenv(ROOT / ".env")
-    load_dotenv(ROOT / "projects-config" / args.project / ".env")
-    # The agent module (adapters/adk/release_app/release/agent.py) reads
+    # The ADK app module (adapters/adk/release_app/release/agent.py) reads
     # PROJECT at load time — one service instance governs one project.
     os.environ["PROJECT"] = args.project
-    # Single-flight: releases are one-decision-one-deploy-at-a-time; two
-    # concurrent trigger events must queue, not race two passes.
-    os.environ.setdefault("ADK_TRIGGER_MAX_CONCURRENT", "1")
 
-    from google.adk.cli.fast_api import get_fast_api_app
-
-    app = get_fast_api_app(
-        agents_dir=str(ROOT / "adapters" / "adk" / "release_app"),
-        web=False,
-        trigger_sources=["pubsub"],
-    )
-    print(f"[release-service] {args.project}: awake on "
-          f"http://{args.host}:{args.port} — one release pass per event "
-          "(POST /apps/release/trigger/pubsub)", flush=True)
-    from orchestrator.heartbeat import serve_with_heartbeat
-    serve_with_heartbeat(app, args.host, args.port,
-                         "/apps/release/trigger/pubsub",
-                         args.heartbeat_minutes, "release")
+    bootstrap.serve_resident(
+        "release_app", "release", args.host, args.port,
+        args.heartbeat_minutes, args.project,
+        describe="one release pass per event")
 
 
 if __name__ == "__main__":

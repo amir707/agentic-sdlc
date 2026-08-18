@@ -34,6 +34,7 @@ def _imports(py_file: Path) -> set[str]:
 # orchestrator, the one-pass release entry, and the resident release
 # service (ADK api server hosting the release Workflow).
 COMPOSITION_ROOTS = {
+    ROOT / "orchestrator" / "bootstrap.py",
     ROOT / "orchestrator" / "__main__.py",
     ROOT / "orchestrator" / "release.py",
     ROOT / "orchestrator" / "release_service.py",
@@ -53,9 +54,7 @@ def test_core_never_imports_a_framework():
 
 
 def _module_level_imports(py_file: Path) -> set[str]:
-    """Imports at module scope only (function-local imports inside a
-    composition-root helper such as context.build_context are wiring,
-    not a dependency of the module's logic)."""
+    """Imports at module scope only."""
     tree = ast.parse(py_file.read_text(), filename=str(py_file))
     modules: set[str] = set()
     for node in tree.body:

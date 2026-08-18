@@ -10,7 +10,7 @@ definition.py says WHAT the process is; the modules below carry it out:
                    release Workflow's nodes call
   governance.py    the ONE way an item is escalated / failed / held /
                    bounced (uniform evidence)
-  context.py       RunContext, built by a composition root
+  context.py       RunContext (built by bootstrap.py, the composition root)
 
 This file keeps the HANDLERS registry (every definition step name ->
 its implementation; test_definition asserts coverage) and re-exports
@@ -21,7 +21,7 @@ PR is the artifact between coder and reviewer; the store is the artifact
 between everything else and the single source of lifecycle truth (G3).
 """
 
-from orchestrator.context import RunContext, build_context  # noqa: F401
+from orchestrator.context import RunContext  # noqa: F401
 from orchestrator.gate import check_decision
 from orchestrator.planning import run_risk_assessor, run_sprint_packer
 from orchestrator.release_flow import (  # noqa: F401

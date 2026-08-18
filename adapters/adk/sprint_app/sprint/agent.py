@@ -14,17 +14,9 @@ allowlisted GitHub comments (ADR-0005).
 
 import os
 
-from adapters.adk.executor import ADKPipelineExecutor
-from adapters.adk.invoker import ADKInvoker
-from adapters.adk.release_workflow import ADKReleaseExecutor
 from adapters.adk.sprint_workflow import build_sprint_workflow
-from orchestrator.config import load_project
-from orchestrator.context import build_context
+from orchestrator import bootstrap
 
-_project = load_project(os.environ["PROJECT"])
-_ctx = build_context(_project, invoker=ADKInvoker(),
-                     executor=ADKPipelineExecutor(),
-                     release_executor=ADKReleaseExecutor())
-
+_ctx = bootstrap.sprint_context(os.environ["PROJECT"])
 root_agent = build_sprint_workflow(
     _ctx, parallel=int(os.environ.get("PARALLEL", "1")))
