@@ -20,14 +20,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "dashboard" / "public"
+sys.path.insert(0, str(ROOT))
 
-
-def _store_base() -> str:
-    url = os.environ.get("DELIVERY_STORE_URL")
-    if url:
-        return url.removesuffix("/mcp").rstrip("/")
-    port = os.environ.get("DELIVERY_STORE_PORT", "8787")
-    return f"http://127.0.0.1:{port}"
+from adapters.store_client import store_base_url as _store_base  # noqa: E402
 
 
 def _repo(project: str) -> str:
