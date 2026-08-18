@@ -22,7 +22,6 @@ removed with the checkout.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +29,7 @@ import tempfile
 from pathlib import Path
 
 from orchestrator.workspace import Workspace
+from orchestrator import redact
 
 
 def _log(message: str) -> None:
@@ -52,13 +52,6 @@ def checkout_path(project_name: str) -> Path:
     return scratch_root() / project_name / "checkout"
 
 
-def redact_url(url: str) -> str:
-    """Strip embedded credentials from a git URL for any human-facing
-    text. Tokens ride in clone/push URLs by design (transient, never in
-    config) — so no error, log, or traceback may echo the URL raw."""
-    return re.sub(r"//[^@/]+@", "//<redacted>@", url)
-
-
 def provision(project_name: str, clone_url: str) -> Workspace:
     """Materialize (or heal) the working checkout; idempotent."""
     target = checkout_path(project_name)
@@ -76,10 +69,10 @@ def provision(project_name: str, clone_url: str) -> Workspace:
             subprocess.run(["git", "clone", "-q", clone_url, str(target)],
                            check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as exc:
-            failure = (exc.returncode, redact_url((exc.stderr or "").strip()))
+            failure = (exc.returncode, redact.url((exc.stderr or "").strip()))
         if failure:
             raise RuntimeError(
-                f"git clone failed for {redact_url(clone_url)} "
+                f"git clone failed for {redact.url(clone_url)} "
                 f"(exit {failure[0]}): {failure[1]} — for a private repo "
                 "this usually means the project .env's GITHUB_TOKEN does "
                 "not list this repository in its fine-grained access")

@@ -21,10 +21,10 @@ error rate the monitor sees.
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
+from orchestrator import redact
 from orchestrator.ports import DeployError  # noqa: F401 (raised here, defined by the core)
 
 
@@ -54,13 +54,6 @@ def _source_dir() -> str:
         sys.exit("deploy: PROJECT_CHECKOUT_DIR is not set — provision "
                  "one first (make deploy-baseline does both)")
     return value
-
-
-def _redact(arg: str) -> str:
-    """Secrets ride in --set-env-vars args (e.g. CONFIG_TOKEN=...); no
-    echo of a command — live or in an error — may show their values."""
-    return re.sub(r"((?:TOKEN|KEY|SECRET)[A-Z_]*=)[^,\s]+", r"\1<redacted>",
-                  arg)
 
 
 # Transient gcloud failure markers — retrying is the correct response.
@@ -95,7 +88,7 @@ def _run(args: list[str], attempts: int = 2) -> None:
     """Bounded, transient-aware execution (the invoker's 429 pattern,
     for infrastructure): a transient failure gets ONE retry; everything
     else fails fast with the redacted command AND gcloud's actual error."""
-    print("+", " ".join(_redact(a) for a in args), flush=True)
+    print("+", " ".join(redact.env_args(a) for a in args), flush=True)
     for attempt in range(attempts):
         code, stderr_tail = _execute(args)
         if code == 0:
@@ -108,8 +101,8 @@ def _run(args: list[str], attempts: int = 2) -> None:
             continue
         raise DeployError(
             f"command failed (exit {code}): "
-            + " ".join(_redact(a) for a in args)
-            + " — gcloud said: " + _redact(stderr_tail.strip()[-500:]))
+            + " ".join(redact.env_args(a) for a in args)
+            + " — gcloud said: " + redact.env_args(stderr_tail.strip()[-500:]))
 
 
 def _describe() -> dict:
