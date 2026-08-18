@@ -10,7 +10,6 @@ import pytest
 from pydantic import ValidationError
 
 from orchestrator import schemas
-from orchestrator.definition import SDLC
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -97,34 +96,13 @@ def test_concrete_adapters_satisfy_the_ports():
     assert names(ports.Deployer) <= {n for n, _ in inspect.getmembers(deploy)}
 
 
-def test_workflow_covers_every_definition_step():
-    """The executing ADK Workflow must have a node for every per-item
-    definition step — the graph IS the per-item execution path now, so a
-    definition step with no node would silently never run. (End-to-end
-    execution of that graph is exercised in test_item_workflow.py.)"""
+def test_workflow_renders_the_definition_graph_exactly():
+    """The executing ADK Workflow is built FROM orchestrator/definition.py's
+    PER_ITEM_EDGES — it renders the definition, it does not redefine it.
+    (Graph-internal consistency is pinned in test_definition.py.)"""
     from adapters.adk.workflow import EDGE_TABLE
-
-    node_names = {src for src, _, _ in EDGE_TABLE if src != "START"} \
-        | {dst for _, dst, _ in EDGE_TABLE}
-    per_item_names = {step.name for step in SDLC.per_item}
-    assert per_item_names <= node_names, (
-        "the ADK Workflow must cover every per-item definition step")
-    # Every definition back-edge is realized as a routed cycle in the graph
-    # (a fix step that returns to the step that requested the fix).
-    for step in SDLC.per_item:
-        if step.back_edge:
-            fixers = {src for src, dst, _ in EDGE_TABLE if dst == step.name
-                      and src != _step_before(step.name)}
-            assert fixers, f"{step.name} declares a back-edge but no cycle "\
-                           "returns to it"
-
-
-def _step_before(name: str) -> str | None:
-    from adapters.adk.workflow import EDGE_TABLE
-    for src, dst, _ in EDGE_TABLE:
-        if dst == name:
-            return src
-    return None
+    from orchestrator.definition import PER_ITEM_EDGES
+    assert list(EDGE_TABLE) == list(PER_ITEM_EDGES)
 
 
 def test_workflow_constructs_and_validates():

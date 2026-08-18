@@ -7,9 +7,9 @@ nodes, and the words its edges are routed by, are the engine's business,
 not the framework's; they live here so they can be typed, read, and
 tested without ADK.
 
-- Route: the edge labels. Cycle edges must carry routes (ADK rejects
-  unconditional cycles) and every routed decision names one of these,
-  so a typo is an AttributeError, not a silently dead edge.
+- Route (from definition.py, the graph's vocabulary): the edge labels
+  every routed decision names, so a typo is an AttributeError, not a
+  silently dead edge.
 - PipelineState: the per-run scaffolding one item's graph accumulates
   (PR number, bounded-loop counters, the verify result, gate cursor).
   Durable truth stays in GitHub and the store (G3); this is the cursor
@@ -22,35 +22,14 @@ tested without ADK.
 """
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 
 from mcp_server.vocab import Actor, Decision, ItemStatus
+from orchestrator.definition import Route  # noqa: F401 (re-exported: the graph's vocabulary)
 from orchestrator import governance, steps
 from orchestrator.dependency_graph import UnparseableSource
 from orchestrator.gate import check_decision
 from orchestrator.rejection import Rejection
 from sdlc_steps.verify import VerifyResult
-
-
-class Route(StrEnum):
-    # code_reviewer ->
-    APPROVED = "approved"
-    CHANGES_REQUESTED = "changes_requested"
-    OUT_OF_SCOPE = "out_of_scope"
-    # coder_fix ->
-    FIXED = "fixed"
-    IMPASSE = "impasse"
-    # verify ->
-    LABELED = "labeled"
-    POLICY_FLAG_REQUIRED = "policy_flag_required"
-    # preprod_ci ->
-    PASSED = "passed"
-    FAILED = "failed"
-    # approval_gate ->
-    APPROVE = "approve"
-    REJECT = "reject"
-    # any bounded loop, on exhaustion ->
-    ESCALATE = "escalate"
 
 
 @dataclass
