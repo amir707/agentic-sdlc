@@ -4,7 +4,7 @@ Release is its own control loop with its own clock — approvals, incidents,
 confidence windows fire on a different timeline than the sprint — so it is
 its own ADK graph, not a branch of the per-item pipeline. Same execution
 model as adapters/adk/workflow.py: nodes delegate to engine handlers
-(driver.release_queue, driver.decide_release_pr), the release-manager
+(release_flow.release_queue, release_flow.decide_release_pr), the release-manager
 agent stays behind the AgentInvoker port, and ADK's runtime owns
 execution. `ADKReleaseExecutor` is the ReleaseExecutor port's ADK impl;
 it is also the natural root_agent for an ambient trigger (Cloud Scheduler
@@ -23,7 +23,7 @@ from google.adk.runners import InMemoryRunner
 from google.adk.workflow import Workflow
 from google.genai import types
 
-from orchestrator import driver
+from orchestrator import release_flow
 from sdlc_steps import incident_resolver
 from adapters.store_client import DeliveryStore
 
@@ -66,7 +66,7 @@ def build_release_workflow(ctx) -> Workflow:
         # events, so every pass must start its walk from the front.
         state["index"] = 0
         state["outcomes"] = []
-        state["queue"] = await driver.release_queue(ctx)
+        state["queue"] = await release_flow.release_queue(ctx)
         if not state["queue"]:
             ctx.board.finish("RELEASE", "queue empty")
             print("[release] queue empty", flush=True)
@@ -78,7 +78,7 @@ def build_release_workflow(ctx) -> Workflow:
 
     async def decide_pr(node_input):
         item = state["queue"][state["index"]]
-        outcome = await driver.decide_release_pr(ctx, item,
+        outcome = await release_flow.decide_release_pr(ctx, item,
                                                  state["confidence"])
         state["outcomes"].append((item["pr"], outcome))
         return Event(output={"pr": item["pr"], "outcome": outcome})

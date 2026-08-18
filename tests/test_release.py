@@ -11,7 +11,7 @@ release-manager agent.
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import driver
+from orchestrator import release_flow
 
 
 class FakeStore:
@@ -35,22 +35,22 @@ def test_release_queue_selects_only_queued_with_pr():
         {"id": "D", "status": "queued", "pr": None},  # queued but no PR yet
         {"id": "E", "status": "queued", "pr": 5},
     ]
-    queue = asyncio.run(driver.release_queue(_ctx(items)))
+    queue = asyncio.run(release_flow.release_queue(_ctx(items)))
     assert [i["id"] for i in queue] == ["A", "E"]
 
 
 def test_release_queue_empty_when_nothing_queued():
     items = [{"id": "A", "status": "released", "pr": 1}]
-    assert asyncio.run(driver.release_queue(_ctx(items))) == []
+    assert asyncio.run(release_flow.release_queue(_ctx(items))) == []
 
 
 def test_no_in_process_recheck_loop_exists():
     """Release is event-driven: ONE pass per invocation, no in-process
     wait loop (a held PR waits for the next event, not an asyncio.sleep).
     Guard against the loop creeping back in."""
-    assert not hasattr(driver, "run_release_loop")
+    assert not hasattr(release_flow, "run_release_loop")
     import inspect
-    assert "asyncio.sleep" not in inspect.getsource(driver.run_release_pass)
+    assert "asyncio.sleep" not in inspect.getsource(release_flow.run_release_pass)
 
 
 def test_release_pass_delegates_to_the_release_executor():
@@ -64,7 +64,7 @@ def test_release_pass_delegates_to_the_release_executor():
 
     ctx = SimpleNamespace(release_lock=asyncio.Lock(),
                           release_executor=FakeExecutor())
-    asyncio.run(driver.run_release_pass(ctx))
+    asyncio.run(release_flow.run_release_pass(ctx))
     assert calls == ["pass"]
 
 
@@ -91,7 +91,7 @@ def test_repo_host_error_escalates_the_item_not_the_pass():
         async def set_status(self, item_id, status, pr=None):
             statuses.append((item_id, status, pr))
 
-    outcome = asyncio.run(driver.decide_release_pr(
+    outcome = asyncio.run(release_flow.decide_release_pr(
         Ctx(), {"id": "CAT-202", "pr": 3}, confidence=10))
     assert outcome == "escalated"
     assert ("CAT-202", "escalated", 3) in statuses

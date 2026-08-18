@@ -11,7 +11,7 @@ is self-sufficient.
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import driver
+from orchestrator import release_flow
 
 
 def test_delegates_to_the_release_service_when_configured(monkeypatch):
@@ -22,14 +22,14 @@ def test_delegates_to_the_release_service_when_configured(monkeypatch):
 
     async def fake_pass(ctx):
         ran_inprocess.append(1)
-    monkeypatch.setattr(driver, "run_release_pass", fake_pass)
+    monkeypatch.setattr(release_flow, "run_release_pass", fake_pass)
 
     async def fake_post(url, name):
         posted.append((url, name))
     import orchestrator.heartbeat as hb
     monkeypatch.setattr(hb, "post_event", fake_post)
 
-    asyncio.run(driver.trigger_release(SimpleNamespace()))
+    asyncio.run(release_flow.trigger_release(SimpleNamespace()))
     assert posted and posted[0][0].endswith("/apps/release/trigger/pubsub")
     assert not ran_inprocess, "must not also run the pass in-process"
 
@@ -40,7 +40,7 @@ def test_runs_in_process_when_no_service_is_configured(monkeypatch):
 
     async def fake_pass(ctx):
         ran_inprocess.append(1)
-    monkeypatch.setattr(driver, "run_release_pass", fake_pass)
+    monkeypatch.setattr(release_flow, "run_release_pass", fake_pass)
 
-    asyncio.run(driver.trigger_release(SimpleNamespace()))
+    asyncio.run(release_flow.trigger_release(SimpleNamespace()))
     assert ran_inprocess == [1]

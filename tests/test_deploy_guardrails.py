@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from adapters import deploy
-from orchestrator import driver, pr_markers
+from orchestrator import pr_markers, release_flow, steps
 from sdlc_steps import preprod_ci
 
 
@@ -54,7 +54,7 @@ def test_deploy_error_fails_the_item_not_the_run(monkeypatch):
                                     get_review_threads=lambda pr: [])
     ctx.workspace = SimpleNamespace(dir="/tmp/checkout")
     ctx.project = SimpleNamespace(name="p")
-    ok = asyncio.run(driver.run_preprod_ci(
+    ok = asyncio.run(steps.run_preprod_ci(
         ctx, {"id": "PAY-1"}, 7, SimpleNamespace(areas={"payments"},
                                                  primary_area="payments")))
     assert ok is False
@@ -121,11 +121,11 @@ def test_promote_failure_after_merge_escalates_not_crashes(monkeypatch):
         verified_risk = "low"
         flag = {"covered": True}
         radius = set()
-    monkeypatch.setattr(driver, "verify_once", _async_return(Verified()))
-    monkeypatch.setattr(driver.schemas.ReleaseDecision, "model_validate",
+    monkeypatch.setattr(release_flow, "verify_once", _async_return(Verified()))
+    monkeypatch.setattr(release_flow.schemas.ReleaseDecision, "model_validate",
                         classmethod(lambda cls, d: SimpleNamespace(
                             action="merge", reasoning="ok", factors={})))
-    monkeypatch.setattr(driver, "extract_json", lambda text: {})
+    monkeypatch.setattr(release_flow, "extract_json", lambda text: {})
 
     def promote_boom(tag):
         raise deploy.DeployError("command failed (exit 1): gcloud ... "
@@ -155,7 +155,7 @@ def test_promote_failure_after_merge_escalates_not_crashes(monkeypatch):
         async def set_status(self, item_id, status, pr=None):
             statuses.append((item_id, status, pr))
 
-    outcome = asyncio.run(driver.decide_release_pr(
+    outcome = asyncio.run(release_flow.decide_release_pr(
         Ctx(), {"id": "PAY-1", "pr": 7}, confidence=10))
     assert outcome == "escalated"
     assert ("PAY-1", "escalated", 7) in statuses

@@ -7,7 +7,7 @@ instance must serve many events (the service reuses it)."""
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import driver
+from orchestrator import sprint
 from adapters.adk.sprint_workflow import build_sprint_workflow
 
 
@@ -16,7 +16,7 @@ def test_one_pass_per_event_and_instance_reuse(monkeypatch):
 
     async def fake_pipeline(ctx, parallel=1, deprovision=True):
         passes.append((parallel, deprovision))
-    monkeypatch.setattr(driver, "run_pipeline", fake_pipeline)
+    monkeypatch.setattr(sprint, "run_pipeline", fake_pipeline)
 
     from google.adk.apps import App, ResumabilityConfig
     from google.adk.runners import InMemoryRunner

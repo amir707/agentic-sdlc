@@ -2,7 +2,7 @@
 
 This file answers exactly one question: what is the pipeline? Which
 steps run, in what order, of what kind, with which bounded back-edges.
-It contains no execution logic (driver.py) and no engine mechanics
+It contains no execution logic (planning.py, steps.py, sprint.py, release_flow.py) and no engine mechanics
 (engine/): customizing the SDLC means editing THIS definition, adding a
 folder under sdlc_steps/, and binding it in the driver's handler
 registry — engine code stays untouched.
