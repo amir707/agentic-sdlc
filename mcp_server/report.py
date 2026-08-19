@@ -116,7 +116,7 @@ def _usage_table(rows) -> list[str]:
 def render(conn, *, board: dict | None = None,
            history: list[dict] | tuple = ()) -> str:
     """The whole store as an operator report. `board` / `history` are
-    the ENGINE's activity view (orchestrator/activity.py), passed in by
+    the ENGINE's activity view (sdlc/engine/activity.py), passed in by
     the caller that has them (the local CLI); the store server renders
     without them — the board lives on the engine's disk, not here."""
     out: list[str] = []

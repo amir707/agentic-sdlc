@@ -2,13 +2,12 @@
 that implement it — a structural test, so a rename or a missing policy
 key breaks loudly here instead of mid-demo."""
 
-from pathlib import Path
 
 from sdlc.engine.config import load_project
 from sdlc import bindings as driver
 from sdlc.definition import GATE, REASONING, SDLC
 
-ROOT = Path(__file__).resolve().parent.parent
+from sdlc.engine.paths import REPO_ROOT as ROOT
 
 
 def test_every_step_has_a_handler():
@@ -215,8 +214,7 @@ def test_architecture_doc_pipeline_is_generated_from_the_definition():
     scripts/render_pipeline.py renders from the definition — run it with
     --write after changing the graph."""
     import importlib.util
-    from pathlib import Path
-    root = Path(__file__).resolve().parent.parent
+    from sdlc.engine.paths import REPO_ROOT as root
     spec = importlib.util.spec_from_file_location(
         "render_pipeline", root / "scripts" / "render_pipeline.py")
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)

@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from sdlc.governance import schemas
-ROOT = Path(__file__).resolve().parent.parent
+from sdlc.engine.paths import REPO_ROOT as ROOT
 
 # The framework-free core: everything under sdlc/ except the adapters
 # (which exist to name frameworks) and app/ (the composition roots), plus

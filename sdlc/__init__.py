@@ -20,5 +20,5 @@ Dependency direction: app -> adapters -> {sprint, release} -> governance
 -> ports/definition/context; engine is a leaf everyone may use. sprint
 may hand off to release (trigger); release never imports sprint. Only
 app/ and adapters/ may name a framework or a concrete tool
-(tests/test_framework_boundary.py enforces all of this).
+(tests/architecture/test_framework_boundary.py enforces all of this).
 """

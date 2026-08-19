@@ -156,9 +156,9 @@ it; fix/flag loops are routed cycle edges, the human gate is a native
 incident hygiene → store-queue walk as a routed cycle, one PR at a
 time). Two composition roots choose the framework
 (`sdlc/app/sprint.py` and `sdlc/app/release.py`), injecting
-the ports each runs. `tests/test_framework_boundary.py` enforces the
+the ports each runs. `tests/architecture/test_framework_boundary.py` enforces the
 boundary structurally (the core imports no framework);
-`tests/test_item_workflow.py` and `tests/test_release_workflow.py` run
+`tests/sprint/test_item_workflow.py` and `tests/release/test_release_workflow.py` run
 both graphs end-to-end on ADK's engine with handlers stubbed; structured
 verdicts (`sdlc/governance/schemas.py`) validate every agent decision at
 the boundary.
