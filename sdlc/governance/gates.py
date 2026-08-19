@@ -14,6 +14,7 @@ from sdlc.context import RunContext
 from sdlc.governance.markers import find_marker, marker
 from sdlc.ports.world import DeployError
 from sdlc.steps import preprod_ci, verify as verify_step
+from sdlc.engine.narrate import say
 
 
 async def verify_once(ctx: RunContext, item: dict,
@@ -36,8 +37,8 @@ async def verify_once(ctx: RunContext, item: dict,
             "assessed_risk": assessed,
             "verified_risk": result.verified_risk,
             "reason": result.escalation_reason})
-        print(f"[verify] PR #{pr} risk escalated "
-              f"{result.claimed_risk} -> {result.verified_risk}", flush=True)
+        say("verify", f"PR #{pr} risk escalated "
+              f"{result.claimed_risk} -> {result.verified_risk}")
 
     if not result.needs_flag:
         # Title: <ITEM-ID>: [area:..][risk:..][flag:..] <item title>
@@ -59,8 +60,8 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
                          verified) -> bool:
     sha = ctx.repo_host.get_pr(pr)["head_sha"]
     if preprod_passed_for_head(ctx, pr, sha):
-        print(f"[resume] PR #{pr}: preprod already passed for {sha[:7]} — "
-              "skipping", flush=True)
+        say("resume", f"PR #{pr}: preprod already passed for {sha[:7]} — "
+              "skipping")
         return True
 
     ctx.board.begin(item["id"], "preprod_ci",
@@ -76,8 +77,8 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
         await ctx.audit(Actor.PREPROD_CI, Decision.PREPROD_RESULT, {
             "pr": pr, "passed": False, "revision": f"pr-{pr}",
             "error": str(exc)[:300]})
-        print(f"[ci] PR #{pr} preprod FAILED (infrastructure): "
-              f"{str(exc)[:120]}", flush=True)
+        say("ci", f"PR #{pr} preprod FAILED (infrastructure): "
+              f"{str(exc)[:120]}")
         return False
     ctx.repo_host.post_comment(pr, (
         preprod_ci.format_comment(ci) + "\n\n"
@@ -89,8 +90,8 @@ async def run_preprod_ci(ctx: RunContext, item: dict, pr: int,
     await ctx.audit(Actor.PREPROD_CI, Decision.PREPROD_RESULT, {
         "pr": pr, "passed": ci.passed, "revision": ci.revision_tag,
         "preprod_url": ci.preprod_url, "smoke": ci.smoke})
-    print(f"[ci] PR #{pr} preprod "
-          f"{'passed' if ci.passed else 'FAILED'}", flush=True)
+    say("ci", f"PR #{pr} preprod "
+          f"{'passed' if ci.passed else 'FAILED'}")
     return ci.passed
 
 

@@ -13,6 +13,7 @@ from sdlc.context import RunContext
 from sdlc.engine.dependency_graph import build_import_graph
 from sdlc.steps import sprint_packer
 from sdlc.steps.risk_assessor import spec as assessor_spec
+from sdlc.engine.narrate import say
 
 
 async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
@@ -29,10 +30,9 @@ async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
 
     for item in items:
         if item["id"] in done:
-            print(f"[assess] {item['id']}: already assessed (skipped)",
-                  flush=True)
+            say("assess", f"{item['id']}: already assessed (skipped)")
             continue
-        print(f"[assess] {item['id']}: {item['title']}", flush=True)
+        say("assess", f"{item['id']}: {item['title']}")
         ctx.board.begin(item["id"], "risk_assessor", item["title"][:40])
         payload = {
             "task": ("Assess this backlog item and record your judgment via "
@@ -61,13 +61,13 @@ async def run_sprint_packer(ctx: RunContext,
         await ctx.audit(Actor.SPRINT_PACKER, Decision.REFUSE_ITEM, {
             "item": refusal.item_id, "constraint": refusal.constraint,
             "detail": refusal.detail})
-        print(f"[pack] REFUSED {refusal.item_id}: {refusal.constraint} "
-              f"({refusal.detail})", flush=True)
+        say("pack", f"REFUSED {refusal.item_id}: {refusal.constraint} "
+              f"({refusal.detail})")
     sprint = await ctx.store.call(
         "create_sprint", item_ids=[i["id"] for i in result.selected],
         rationale=result.rationale)
     await ctx.audit(Actor.SPRINT_PACKER, Decision.CREATE_SPRINT, {
         "sprint": sprint["id"], "items": sprint["item_ids"],
         "rationale": result.rationale})
-    print(f"[pack] sprint #{sprint['id']}: {sprint['item_ids']}", flush=True)
+    say("pack", f"sprint #{sprint['id']}: {sprint['item_ids']}")
     return result.selected

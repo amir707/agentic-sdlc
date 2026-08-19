@@ -25,6 +25,7 @@ from sdlc.ports.execution import PipelineExecutor, ReleaseExecutor
 from sdlc.ports.agents import AgentInvoker
 
 from sdlc.engine.paths import REPO_ROOT as ROOT
+from sdlc.engine.narrate import say
 
 
 # --- environment + arguments -------------------------------------------------
@@ -98,11 +99,10 @@ def release_context(project_name: str) -> RunContext:
 
 
 def announce_models() -> None:
-    print("[orchestrator] models: "
+    say("orchestrator", "models: "
           f"coder={os.environ.get('CODER_MODEL', 'anthropic/claude-sonnet-5')} | "
           f"reviewer={os.environ.get('REVIEWER_MODEL') or os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')} | "
-          f"gemini-default={os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}",
-          flush=True)
+          f"gemini-default={os.environ.get('GEMINI_MODEL', 'gemini-flash-latest')}")
 
 
 # --- running ----------------------------------------------------------------------
@@ -139,7 +139,7 @@ def serve_resident(app_dir: str, app_name: str, host: str, port: int,
     trigger_path = f"/apps/{app_name}/trigger/pubsub"
     app = get_fast_api_app(agents_dir=str(ROOT / "sdlc" / "adapters" / "adk" / "apps" / app_dir),
                            web=False, trigger_sources=["pubsub"])
-    print(f"[{app_name}-service] {project}: awake on http://{host}:{port} — "
-          f"{describe} (POST {trigger_path})", flush=True)
+    say(f"{app_name}-service", f"{project}: awake on http://{host}:{port} — "
+        f"{describe} (POST {trigger_path})")
     serve_with_heartbeat(app, host, port, trigger_path, heartbeat_minutes,
                          app_name)

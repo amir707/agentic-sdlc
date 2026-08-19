@@ -7,6 +7,7 @@
   activity.py          the live "who is doing what, since when" board
   heartbeat.py         internal self-wake for the resident services
   redact.py            secret redaction for anything human-facing
+  narrate.py           say(tag, msg): one voice; [tag] lines locally, JSON lines on Cloud Run
   errors.py            one-line operator-facing failure summaries
   json_util.py         lenient JSON extraction from model output
   agent_support.py     shared helpers for the reasoning steps' spec.py files

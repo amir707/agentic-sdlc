@@ -25,6 +25,7 @@ from sdlc.release.flow import trigger_release
 from sdlc.sprint.actions import branch_for, open_pr, run_coder
 from sdlc.engine.workspace import WorkspaceFactory
 from sdlc.steps import incident_resolver
+from sdlc.engine.narrate import say
 
 
 async def _escalation_override(ctx: "RunContext", item: dict,
@@ -72,7 +73,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     """One item's full journey (self-contained: parallel workers run
     this concurrently, each with its own workspace)."""
     branch = branch_for(item)
-    print(f"\n=== {item['id']}: {item['title']} ===", flush=True)
+    say("item", f"=== {item['id']}: {item['title']} ===")
 
     # THE STORE decides where this item is in its life — never GitHub
     # (the PR is the artifact; the store is the truth).
@@ -80,18 +81,17 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
     pr = item.get("pr")
 
     if status == ItemStatus.RELEASED:
-        print(f"[resume] {item['id']}: already released — nothing to do",
-              flush=True)
+        say("resume", f"{item['id']}: already released — nothing to do")
         return None
     if status == ItemStatus.REJECTED:
-        print(f"[resume] {item['id']}: rejected — nothing to do", flush=True)
+        say("resume", f"{item['id']}: rejected — nothing to do")
         return None
     if status.is_parked:
         override = await _escalation_override(ctx, item, pr) if pr else None
         if override is None or override.kind == "hold":
-            print(f"[resume] {item['id']}: status={status} — waiting on a "
+            say("resume", f"{item['id']}: status={status} — waiting on a "
                   "human (/approve or /reject on the PR to resolve); "
-                  "skipping this run", flush=True)
+                  "skipping this run")
             return None
         if override.kind == "reject":
             await governance.bounce(
@@ -108,9 +108,9 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
             "was_status": status})
         await ctx.set_status(item["id"], ItemStatus.QUEUED, pr)
         status = ItemStatus.QUEUED
-        print(f"[resume] {item['id']}: escalation overridden by "
+        say("resume", f"{item['id']}: escalation overridden by "
               f"{override.author}'s /approve — queued for release "
-              "(machine gates re-run)", flush=True)
+              "(machine gates re-run)")
 
     if pr is None:
         if item["implementation"] == "human":
@@ -135,8 +135,7 @@ async def _process_item(ctx: RunContext, item: dict) -> None:
             pr = await open_pr(ctx, item, branch)
         await ctx.set_status(item["id"], ItemStatus.IN_REVIEW, pr)
     else:
-        print(f"[resume] {item['id']}: PR #{pr} at status={status}",
-              flush=True)
+        say("resume", f"{item['id']}: PR #{pr} at status={status}")
         # Detached: the branch may be held by another checkout (the
         # base, after a crashed sequential run) — a branch can only be
         # checked out in ONE worktree, and nothing here needs the name
@@ -196,8 +195,8 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
     # explicit way to start a new sprint.
     sprint = await ctx.store.call("get_current_sprint")
     if sprint:
-        print(f"[pack] resuming sprint #{sprint['id']}: "
-              f"{sprint['item_ids']}", flush=True)
+        say("pack", f"resuming sprint #{sprint['id']}: "
+              f"{sprint['item_ids']}")
         backlog = {i["id"]: i for i in await ctx.store.call("list_backlog")}
         selected = [backlog[i] for i in sprint["item_ids"] if i in backlog]
         # A finished sprint stays finished (the invariant above) — but
@@ -210,8 +209,8 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
             note = (f"; {len(leftover)} backlog items were never packed "
                     f"({', '.join(leftover)}) — run 'make seed' to start "
                     "a new sprint" if leftover else "")
-            print(f"[pack] sprint #{sprint['id']} is complete: every item "
-                  f"is released or rejected{note}", flush=True)
+            say("pack", f"sprint #{sprint['id']} is complete: every item "
+                  f"is released or rejected{note}")
     else:
         assessments = await run_risk_assessor(ctx)
         selected = await run_sprint_packer(ctx, assessments)
@@ -232,8 +231,8 @@ async def run_pipeline(ctx: RunContext, parallel: int = 1,
                     ctx, workspace=factory.for_item(item["id"]))
                 return await process_item(item_ctx, item)
 
-        print(f"[pipeline] running {len(agent_items)} agent items with "
-              f"up to {parallel} concurrent coders", flush=True)
+        say("pipeline", f"running {len(agent_items)} agent items with "
+              f"up to {parallel} concurrent coders")
         await asyncio.gather(*(worker(i) for i in agent_items))
         for item in human_items:
             await process_item(ctx, item)

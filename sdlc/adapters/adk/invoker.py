@@ -27,6 +27,7 @@ from google.genai import types
 
 from sdlc.adapters.store_client import auth_headers, store_url
 from sdlc.ports.agents import AgentSpec, Invocation, StoreTools
+from sdlc.engine.narrate import say
 
 
 def _materialize_tool(tool):
@@ -182,10 +183,9 @@ class ADKInvoker:
                     # window — fail fast with the actionable summary.
                     raise
                 delay = _retry_seconds(exc, attempt)
-                print(f"[invoker] {spec.name}: transient provider "
+                say("invoker", f"{spec.name}: transient provider "
                       f"error ({type(exc).__name__}); "
-                      f"retry {attempt + 1}/{retries} in {delay:.0f}s",
-                      flush=True)
+                      f"retry {attempt + 1}/{retries} in {delay:.0f}s")
                 await asyncio.sleep(delay)
         raise RuntimeError("unreachable")
 

@@ -18,6 +18,7 @@ import asyncio
 import itertools
 
 import httpx
+from sdlc.engine.narrate import say
 
 
 def _payload(name: str, n: int) -> dict:
@@ -34,9 +35,9 @@ async def _beat_forever(url: str, minutes: float, name: str) -> None:
                 await client.post(url, json=_payload(name, n))
         except Exception as exc:  # noqa: BLE001 — a failed beat is only
             # a missed wake-up; the next one (or any real event) retries.
-            print(f"[heartbeat] {name}: beat {n} failed "
+            say("heartbeat", f"{name}: beat {n} failed "
                   f"({type(exc).__name__}: {str(exc)[:80]}) — "
-                  "next interval retries", flush=True)
+                  "next interval retries")
 
 
 async def post_event(url: str, name: str) -> None:
@@ -49,9 +50,9 @@ async def post_event(url: str, name: str) -> None:
         async with httpx.AsyncClient(timeout=None) as client:
             await client.post(url, json=_payload(name, 1))
     except Exception as exc:  # noqa: BLE001
-        print(f"[event] {name}: delivery to {url} failed "
+        say("event", f"{name}: delivery to {url} failed "
               f"({type(exc).__name__}: {str(exc)[:80]}) — the receiver's "
-              "heartbeat will pick the state up", flush=True)
+              "heartbeat will pick the state up")
 
 
 async def _serve(app, host: str, port: int, url: str, minutes: float,
@@ -76,7 +77,6 @@ def serve_with_heartbeat(app, host: str, port: int, trigger_path: str,
     Scheduler/webhook own the wake-ups then."""
     url = f"http://{host}:{port}{trigger_path}"
     if minutes > 0:
-        print(f"[heartbeat] {name}: waking every {minutes:g}m -> {url} "
-              "(set --heartbeat-minutes 0 once Scheduler/webhook are wired)",
-              flush=True)
+        say("heartbeat", f"{name}: waking every {minutes:g}m -> {url} "
+              "(set --heartbeat-minutes 0 once Scheduler/webhook are wired)")
     asyncio.run(_serve(app, host, port, url, minutes, name))
