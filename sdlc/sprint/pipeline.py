@@ -219,7 +219,10 @@ async def approver(ctx, item: dict, state: PipelineState) -> NodeResult:
     after it, so a decision made before the gate first looks is seen)."""
     state.gate_baseline = await steps.run_approver(
         ctx, item, state.pr, state.verified)
-    await ctx.set_status(item["id"], ItemStatus.AWAITING_APPROVAL, state.pr)
+    if ctx.project.shape.human_gate:
+        await ctx.set_status(item["id"], ItemStatus.AWAITING_APPROVAL, state.pr)
+    # (no human gate: the dossier is still posted as the audit artifact;
+    #  the graph goes straight to `queued`, which sets the status)
     return NodeResult("dossier posted")
 
 

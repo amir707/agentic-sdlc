@@ -30,7 +30,7 @@ from google.adk.workflow import FunctionNode, Workflow
 
 from mcp_server.vocab import STATUS_LABELS, ItemStatus
 from sdlc.sprint import pipeline
-from sdlc.definition import PER_ITEM_EDGES, START, Route
+from sdlc.definition import PER_ITEM_EDGES, START, Route, per_item_edges
 from sdlc.sprint.pipeline import PipelineState
 
 # The topology comes from the definition; this module only renders it
@@ -120,8 +120,11 @@ def build_item_workflow(ctx, item: dict, branch: str,
 
     # This ADK version encodes routing as (source, {route: target, ...});
     # unrouted edges are plain (source, target). Group the table by source.
+    # The project's SHAPE picks the edges (pipeline.yaml, e.g. no human
+    # gate); the default shape is EDGE_TABLE. Nodes a shape leaves out
+    # are simply never wired.
     by_source: dict[str, list[tuple[str, Route | None]]] = {}
-    for src, dst, route in EDGE_TABLE:
+    for src, dst, route in per_item_edges(ctx.project.shape):
         by_source.setdefault(src, []).append((dst, route))
 
     edges = []

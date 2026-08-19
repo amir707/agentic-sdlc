@@ -22,6 +22,7 @@ from pathlib import Path
 import yaml
 
 from sdlc.engine.paths import REPO_ROOT as ROOT  # noqa: E402
+from sdlc.definition import PipelineShape
 SDLC_STEPS = ROOT / "sdlc" / "steps"
 PROJECTS = ROOT / "projects-config"
 
@@ -60,6 +61,7 @@ class ProjectConfig:
     default_area: str
     project_dir: Path
     smoke_endpoints: dict[str, str] = field(default_factory=dict)
+    shape: PipelineShape = field(default_factory=PipelineShape)
     _policies: dict[str, dict] = field(default_factory=dict)
 
     @property
@@ -112,6 +114,15 @@ class ProjectConfig:
         return self.project_dir / "backlog.json"
 
 
+def _load_shape(project_dir: Path) -> PipelineShape:
+    """projects-config/<name>/pipeline.yaml — the per-project pipeline
+    SHAPE (proposal 0001 §7). Absent = the default shape."""
+    try:
+        return PipelineShape.from_mapping(_read_yaml(project_dir / "pipeline.yaml"))
+    except ValueError as exc:
+        raise ConfigError(f"{project_dir / 'pipeline.yaml'}: {exc}") from None
+
+
 def load_project(name: str) -> ProjectConfig:
     project_dir = PROJECTS / name
     if not project_dir.is_dir():
@@ -132,6 +143,7 @@ def load_project(name: str) -> ProjectConfig:
         default_area=definition["default_area"],
         project_dir=project_dir,
         smoke_endpoints=definition.get("smoke_endpoints", {}),
+        shape=_load_shape(project_dir),
     )
     _validate(config)
     return config
@@ -139,7 +151,8 @@ def load_project(name: str) -> ProjectConfig:
 
 def _validate(config: ProjectConfig) -> None:
     """Fail fast on the mistakes that would otherwise surface mid-sprint."""
-    if not config.policy("approver").get("approvers"):
+    # A human gate needs humans; a shape without one needs no approvers.
+    if config.shape.human_gate and not config.policy("approver").get("approvers"):
         raise ConfigError(
             f"project {config.name!r} has no approvers — set them in "
             f"projects-config/{config.name}/steps/approver/policy.yaml")

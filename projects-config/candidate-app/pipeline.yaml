@@ -1,0 +1,11 @@
+# The pipeline SHAPE for this project (engine: sdlc/definition.py,
+# PipelineShape). Only the axes that are SAFE to vary are configurable;
+# the coder/review loop, verify + flag policy, preprod, the release
+# guard and the audit are engine guarantees and are not knobs — an
+# unknown key here fails the load on purpose.
+#
+# human_gate: a human must /approve on the PR before an item is queued
+# for release. false = the approver still posts its dossier (the audit
+# artifact) and the item queues immediately after preprod passes —
+# for a low-risk internal tool, say. Default: true.
+human_gate: true

@@ -12,6 +12,7 @@ from sdlc.governance import outcomes
 from sdlc.sprint import pipeline
 
 from sdlc.sprint import actions as steps
+from sdlc.definition import PipelineShape
 from sdlc.sprint.pipeline import GateWait, PipelineState, Route
 
 
@@ -20,7 +21,7 @@ class Ctx:
         self.audits, self.statuses = [], []
         pol = {"orchestrator": {"max_flag_fix_iterations": max_flag},
                "approver": approver_policy or {"approvers": ["amir707"]}}
-        self.project = SimpleNamespace(policy=pol.__getitem__)
+        self.project = SimpleNamespace(policy=pol.__getitem__, shape=PipelineShape())
         self.repo_host = self.store = None
         self.board = SimpleNamespace(finish=lambda *a: None)
         self.ci_lock = asyncio.Lock()
