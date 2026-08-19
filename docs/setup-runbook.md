@@ -431,7 +431,33 @@ make release-service PROJECT=candidate-app-2 HEARTBEAT=10
 #   [webhook] github:comment:<pr> — nudging 2 trigger(s)
 # and the gate takes its one authenticated look within a second.
 
-# 2. CLOUD: point the hook at the deployed sprint service
+# 2. CLOUD: the RESIDENT services as Cloud Run services (the Job in 9.5
+#    is the one-shot shape; webhooks need a listener). Same image, same
+#    secrets; PORT is injected and honored; heartbeat 0 for the sprint,
+#    a timer for release; the sprint delegates release to the release
+#    service's trigger URL. --allow-unauthenticated: GitHub cannot carry
+#    a Google identity (tradeoff below); the webhook route is HMAC-gated.
+printf '%s' "$(grep '^GITHUB_WEBHOOK_SECRET=' projects-config/candidate-app-2/.env | cut -d= -f2-)" \
+  | gcloud secrets create GITHUB_WEBHOOK_SECRET --data-file=-
+gcloud secrets add-iam-policy-binding GITHUB_WEBHOOK_SECRET \
+  --member="serviceAccount:$SA_EMAIL" --role=roles/secretmanager.secretAccessor
+COMMON_ENV="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,LOG_FORMAT=json,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app-2"
+COMMON_SECRETS="ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest"
+gcloud run deploy release-service --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" --allow-unauthenticated \
+  --min-instances=0 --max-instances=1 --memory=2Gi --cpu=2 --timeout=3600 \
+  --command=python --args=-m,sdlc.app.release_service,--project,candidate-app-2,--heartbeat-minutes,60 \
+  --set-env-vars="$COMMON_ENV" --set-secrets="$COMMON_SECRETS"
+RELEASE_URL="$(gcloud run services describe release-service --region "$REGION" --format='value(status.url)')/apps/release/trigger/pubsub"
+gcloud run deploy sprint-service --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" --allow-unauthenticated \
+  --min-instances=0 --max-instances=1 --memory=2Gi --cpu=2 --timeout=3600 \
+  --command=python --args=-m,sdlc.app.sprint_service,--project,candidate-app-2,--parallel,2,--heartbeat-minutes,0,--release-url,"$RELEASE_URL" \
+  --set-env-vars="$COMMON_ENV" --set-secrets="$COMMON_SECRETS"
+# (min-instances=0: a webhook delivery cold-starts the service; the
+#  route answers 202 within GitHub's 10 s — the pass runs after.)
+
+# 3. point the GitHub hook at the sprint service
 SPRINT_URL=$(gcloud run services describe sprint-service --region "$REGION" --format='value(status.url)')
 gh api repos/amir707/candidate-app-2/hooks -X POST \
   -f name=web -F active=true \
