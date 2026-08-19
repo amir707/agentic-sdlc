@@ -9,7 +9,6 @@ demo script expects.
 
 import json
 import textwrap
-from pathlib import Path
 
 import pytest
 
@@ -20,7 +19,7 @@ from sdlc.engine.dependency_graph import (UnparseableSource, blast_radius,
 from sdlc.tools.diff_analysis import areas_touched, files_touched, flag_coverage
 from sdlc.steps.sprint_packer import pack
 
-ROOT = Path(__file__).resolve().parent.parent
+from sdlc.engine.paths import REPO_ROOT as ROOT
 
 
 # --- engine/config -----------------------------------------------------------

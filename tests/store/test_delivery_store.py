@@ -12,13 +12,12 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-ROOT = Path(__file__).resolve().parent.parent
+from sdlc.engine.paths import REPO_ROOT as ROOT
 PORT = 8899
 URL = f"http://127.0.0.1:{PORT}/mcp"
 

@@ -47,9 +47,9 @@ def test_no_audit_decision_is_spelled_outside_the_enum():
     via Decision.*; a bare literal is a rename waiting to break the
     oracle. (Scans call sites: ctx.audit(...), append_audit(...),
     decision=...)."""
-    import pathlib, re
+    import re
     from mcp_server.vocab import Decision
-    root = pathlib.Path(__file__).resolve().parent.parent
+    from sdlc.engine.paths import REPO_ROOT as root
     literal = re.compile(
         r'(?:\.audit\(\s*[^,]+,\s*|append_audit\([^,]+,\s*[^,]+,\s*|decision=)"([a-z_]+)"')
     offenders = []

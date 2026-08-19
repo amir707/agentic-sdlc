@@ -9,11 +9,10 @@ of break."""
 
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+from sdlc.engine.paths import REPO_ROOT as ROOT
 SCRIPTS = sorted(p for p in (ROOT / "scripts").glob("*.py"))
 
 

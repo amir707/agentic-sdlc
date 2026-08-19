@@ -44,5 +44,5 @@ COPY . .
 # idempotent seed + serve as before. Cloud Run injects PORT;
 # DELIVERY_STORE_HOST=0.0.0.0 is set on the service. Production
 # successor: Firestore behind the same mcp_server tool surface
-# (contract: tests/test_store_backend_contract.py).
+# (contract: tests/store/test_backend_contract.py).
 CMD ["sh", "scripts/store_entrypoint.sh"]

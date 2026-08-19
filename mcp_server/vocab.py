@@ -101,7 +101,7 @@ class Decision(StrEnum):
     HUMAN_OVERRIDE_ESCALATION = "human_override_escalation"
     HUMAN_PR = "human_pr"
     IGNORE_UNAUTHORIZED_COMMAND = "ignore_unauthorized_command"
-    # governance outcomes (orchestrator/governance.py)
+    # governance outcomes (sdlc/governance/outcomes.py)
     ESCALATE_TO_HUMAN = "escalate_to_human"
     HOLD_MERGE = "hold_merge"
     # release

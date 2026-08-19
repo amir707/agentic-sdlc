@@ -70,9 +70,9 @@ EOF
 ```bash
 cd agentic-sdlc
 set -a; source .env; source projects-config/candidate-app/.env; set +a
-.venv/bin/python -m adapters.deploy baseline  # gcloud run deploy --source
-.venv/bin/python -m adapters.deploy url       # print the live URL
-curl "$(.venv/bin/python -m adapters.deploy url)/health"
+.venv/bin/python -m sdlc.adapters.gcloud baseline  # gcloud run deploy --source
+.venv/bin/python -m sdlc.adapters.gcloud url       # print the live URL
+curl "$(.venv/bin/python -m sdlc.adapters.gcloud url)/health"
 ```
 
 ## 5. (Recommended) dedicated deploy service account
@@ -134,7 +134,7 @@ One image, two roles (see Dockerfile). Demo-scale choices, stated
 honestly: SQLite restored/replicated via **Litestream -> GCS** so the
 store runs SERVERLESS at min-instances=0 (~$0 idle; Firestore behind
 the same tool surface is the production successor — the mechanical
-recipe is tests/test_store_backend_contract.py), store behind Cloud
+recipe is tests/store/test_backend_contract.py), store behind Cloud
 Run IAM (--no-allow-unauthenticated; role tokens do role scoping in
 X-Store-Token), gate polling inside the job (GitHub webhook -> job
 execution is the successor). Single writer: keep max-instances=1.
@@ -211,7 +211,7 @@ gcloud run services add-iam-policy-binding delivery-store \
 # 9.5 the orchestrator (Cloud Run Job)
 gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
-  --command=python --args=-m,orchestrator,--project,candidate-app,--parallel,2 \
+  --command=python --args=-m,sdlc.app.sprint,--project,candidate-app,--parallel,2 \
   --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
   --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
   --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
@@ -270,7 +270,7 @@ gcloud run services update delivery-store --region "$REGION" \
 #      CLOUD_RUN_SERVICE) as env vars, per-project secrets mapped back
 #      to the standard variable names
 gcloud run jobs update orchestrator --region "$REGION" \
-  --args=-m,orchestrator,--project,$NAME,--parallel,2 \
+  --args=-m,sdlc.app.sprint,--project,$NAME,--parallel,2 \
   --update-env-vars="CLOUD_RUN_SERVICE=$(grep '^CLOUD_RUN_SERVICE=' "projects-config/$NAME/.env" | cut -d= -f2-),GCP_PROJECT=$(grep '^GCP_PROJECT=' "projects-config/$NAME/.env" | cut -d= -f2-),GCP_REGION=$(grep '^GCP_REGION=' "projects-config/$NAME/.env" | cut -d= -f2-)" \
   --update-secrets=GITHUB_TOKEN=GITHUB_TOKEN_${SUF}:latest,CONFIG_TOKEN=CONFIG_TOKEN_${SUF}:latest
 ```
@@ -367,7 +367,7 @@ window not elapsed) simply stays `queued`; the NEXT event reconsiders it.
 ```bash
 # one release pass over store state, then exit:
 make release PROJECT=candidate-app
-#   → python -m orchestrator.release --project <name>
+#   → python -m sdlc.app.release --project <name>
 ```
 
 The event is the loop — and the RESIDENT release manager is built:
@@ -375,7 +375,7 @@ The event is the loop — and the RESIDENT release manager is built:
 ```bash
 # stays awake listening; runs one release pass per incoming event
 make release-service PROJECT=candidate-app-2
-#   → python -m orchestrator.release_service --project <name>  (port 8788)
+#   → python -m sdlc.app.release_service --project <name>  (port 8788)
 
 # wake it manually (a Pub/Sub-shaped POST; base64 payload is arbitrary):
 curl -s -X POST localhost:8788/apps/release/trigger/pubsub \
