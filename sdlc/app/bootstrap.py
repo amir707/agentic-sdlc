@@ -129,10 +129,13 @@ def run_cli(coro, *, label: str, interrupted: str, failed_hint: str = "",
 
 def serve_resident(app_dir: str, app_name: str, host: str, port: int,
                    heartbeat_minutes: float, project: str,
-                   describe: str) -> None:
+                   describe: str, extra_targets: list[str] = ()) -> None:
     """Stand up a resident ADK api server (ambient Pub/Sub trigger) with
-    the internal heartbeat as a sibling task. Single-flight by default:
-    two concurrent events must queue, not race two passes."""
+    the internal heartbeat as a sibling task, and — when
+    GITHUB_WEBHOOK_SECRET is set — the GitHub webhook route that nudges
+    this service's trigger (plus `extra_targets`, e.g. the release
+    service's) on gate comments and new PR heads. Single-flight by
+    default: two concurrent events must queue, not race two passes."""
     os.environ.setdefault("ADK_TRIGGER_MAX_CONCURRENT", "1")
     from google.adk.cli.fast_api import get_fast_api_app
     from sdlc.engine.heartbeat import serve_with_heartbeat
@@ -141,5 +144,18 @@ def serve_resident(app_dir: str, app_name: str, host: str, port: int,
                            web=False, trigger_sources=["pubsub"])
     say(f"{app_name}-service", f"{project}: awake on http://{host}:{port} — "
         f"{describe} (POST {trigger_path})")
+
+    secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
+    if secret:
+        from sdlc.app.webhook import WEBHOOK_PATH, mount_github_webhook
+        own = f"http://127.0.0.1:{port}{trigger_path}"
+        mount_github_webhook(app, secret=secret,
+                             targets=[own, *extra_targets])
+        say(f"{app_name}-service", f"GitHub webhook mounted at {WEBHOOK_PATH} "
+            "(gate comments and new PR heads nudge the pass; with this "
+            "wired, --heartbeat-minutes 0 is safe for the sprint)")
+    else:
+        say(f"{app_name}-service", "no GITHUB_WEBHOOK_SECRET — webhook route "
+            "not mounted; the heartbeat is the only wake-up")
     serve_with_heartbeat(app, host, port, trigger_path, heartbeat_minutes,
                          app_name)

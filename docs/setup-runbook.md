@@ -338,8 +338,9 @@ gcloud scheduler jobs create http orchestrator-heartbeat \
 gcloud scheduler jobs pause orchestrator-heartbeat --location "$REGION"
 ```
 
-The production successor remains a GitHub webhook (issue_comment ->
-jobs.run), so the /approve comment itself triggers the resuming run.
+The webhook itself is now built for the RESIDENT services (§13a); for
+the one-shot Job shape, the successor is the same hook aimed at a relay
+that runs jobs.run.
 
 ## 11. Stop a cloud orchestrator run
 
@@ -397,6 +398,59 @@ resolver** on recovery (the held-PR-can-move event). At-least-once and
 duplicate deliveries are safe: the pass is stateless over the store, so
 a spurious wake-up costs one read and "queue empty". The sprint
 orchestrator only has to drive items to `status=queued`.
+
+## 13a. GitHub webhook → trigger: the real event source (retires the heartbeat)
+
+The heartbeat was the local stand-in for real events. The real one is a
+GitHub webhook: a gate comment (`/approve`, `/reject`, `/hold`) on a PR,
+or a new PR head, wakes the resident services immediately. The services
+mount `POST /webhooks/github` when `GITHUB_WEBHOOK_SECRET` is set
+(project `.env`); the route verifies GitHub's HMAC, filters to the
+events the pipeline reacts to, and nudges the SAME trigger endpoints the
+heartbeat nudges (`sdlc/app/webhook.py`) — the sprint service also
+forwards to the release service's trigger when `--release-url` is set,
+because an approval both resumes the gate and queues an item.
+
+```bash
+# 0. a secret, shared by GitHub and the services (project .env)
+python3 -c 'import secrets; print("GITHUB_WEBHOOK_SECRET=" + secrets.token_urlsafe(24))' \
+  >> projects-config/candidate-app-2/.env
+
+# 1. LOCAL: GitHub cannot reach localhost — forward deliveries with the
+#    gh webhook extension (one-time: gh extension install cli/gh-webhook)
+set -a; source projects-config/candidate-app-2/.env; set +a
+gh webhook forward --repo amir707/candidate-app-2 \
+  --events issue_comment,pull_request \
+  --url http://127.0.0.1:8789/webhooks/github --secret "$GITHUB_WEBHOOK_SECRET"
+# in other terminals, the services — heartbeat can now be 0 for the sprint
+# (the release service keeps a heartbeat: confidence windows need a timer)
+make orchestrate-service PROJECT=candidate-app-2 HEARTBEAT=0 \
+  RELEASE_URL=http://127.0.0.1:8788/apps/release/trigger/pubsub
+make release-service PROJECT=candidate-app-2 HEARTBEAT=10
+# comment /approve on a PR → the sprint service logs
+#   [webhook] github:comment:<pr> — nudging 2 trigger(s)
+# and the gate takes its one authenticated look within a second.
+
+# 2. CLOUD: point the hook at the deployed sprint service
+SPRINT_URL=$(gcloud run services describe sprint-service --region "$REGION" --format='value(status.url)')
+gh api repos/amir707/candidate-app-2/hooks -X POST \
+  -f name=web -F active=true \
+  -f 'events[]=issue_comment' -f 'events[]=pull_request' \
+  -f config[url]="$SPRINT_URL/webhooks/github" \
+  -f config[content_type]=json -f config[secret]="$GITHUB_WEBHOOK_SECRET"
+# GitHub sends a `ping` on creation; the route answers {"pong": true}.
+```
+
+Exposure, stated plainly: GitHub cannot carry a Google identity, so a
+service that receives webhooks must accept unauthenticated ingress on
+that path — and Cloud Run IAM is per SERVICE, so its Pub/Sub trigger
+path becomes reachable too. What that exposes is a NUDGE: the trigger
+runs one idempotent pass (a store read and a few repo-host lookups when
+nothing changed) and no authority — the gate still reads the allowlisted
+comment itself (ADR-0005). The webhook route stays HMAC-gated regardless.
+Production successor if that cost surface matters: a tiny relay (Cloud
+Function/Run, allow-unauthenticated, HMAC-verifying) that publishes to
+Pub/Sub, keeping the services IAM-locked behind a push subscription.
 
 ## 12. Tear down: stop the hourly bill after testing
 
