@@ -22,11 +22,11 @@ from sdlc.ports.world import DeployError
 from sdlc.governance.gates import (  # noqa: F401 — the machine gates, shared with release
     preprod_passed_for_head, run_preprod_ci, verify_once)
 from sdlc.governance.markers import find_marker, marker
-from sdlc_steps import preprod_ci, verify as verify_step
-from sdlc_steps.approver import spec as approver_spec
-from sdlc_steps.code_reviewer import spec as reviewer_spec
-from sdlc_steps.coder import spec as coder_spec
-from tools.diff_analysis import files_touched
+from sdlc.steps import preprod_ci, verify as verify_step
+from sdlc.steps.approver import spec as approver_spec
+from sdlc.steps.code_reviewer import spec as reviewer_spec
+from sdlc.steps.coder import spec as coder_spec
+from sdlc.tools.diff_analysis import files_touched
 
 
 def _slug(title: str) -> str:

@@ -8,9 +8,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from adapters import deploy
-from orchestrator import pr_markers, release_flow, steps
-from sdlc_steps import preprod_ci
+from sdlc.adapters import gcloud as deploy
+from sdlc.governance import markers as pr_markers
+from sdlc.release import flow as release_flow
+from sdlc.sprint import actions as steps
+from sdlc.steps import preprod_ci
 
 
 def test_failed_gcloud_command_redacts_secrets(monkeypatch):
@@ -31,7 +33,7 @@ def test_deploy_error_fails_the_item_not_the_run(monkeypatch):
     """run_preprod_ci turns a DeployError into ci-failed (False) with an
     audited, redacted reason — the workflow routes it to `failed` and the
     sprint continues to the next item."""
-    def boom(pr, checkout, areas, project):
+    def boom(pr, checkout, areas, project, deployer):
         raise deploy.DeployError("command failed (exit 1): gcloud run "
                                  "deploy x --set-env-vars "
                                  "CONFIG_TOKEN=<redacted>")
@@ -54,6 +56,7 @@ def test_deploy_error_fails_the_item_not_the_run(monkeypatch):
                                     get_review_threads=lambda pr: [])
     ctx.workspace = SimpleNamespace(dir="/tmp/checkout")
     ctx.project = SimpleNamespace(name="p")
+    ctx.deployer = None  # the port; boom() never reaches it
     ok = asyncio.run(steps.run_preprod_ci(
         ctx, {"id": "PAY-1"}, 7, SimpleNamespace(areas={"payments"},
                                                  primary_area="payments")))

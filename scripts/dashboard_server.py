@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "dashboard" / "public"
 sys.path.insert(0, str(ROOT))
 
-from adapters.store_client import store_base_url as _store_base  # noqa: E402
+from sdlc.adapters.store_client import store_base_url as _store_base  # noqa: E402
 
 
 def _repo(project: str) -> str:

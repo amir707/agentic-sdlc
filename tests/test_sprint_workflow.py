@@ -7,8 +7,8 @@ instance must serve many events (the service reuses it)."""
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import sprint
-from adapters.adk.sprint_workflow import build_sprint_workflow
+from sdlc.sprint import flow as sprint
+from sdlc.adapters.adk.sprint_workflow import build_sprint_workflow
 
 
 def test_one_pass_per_event_and_instance_reuse(monkeypatch):

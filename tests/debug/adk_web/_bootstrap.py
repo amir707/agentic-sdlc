@@ -19,8 +19,8 @@ from dotenv import load_dotenv
 load_dotenv(REPO_ROOT / ".env")
 load_dotenv(REPO_ROOT / "projects-config" / "candidate-app" / ".env")
 
-from adapters.adk.invoker import build_llm_agent  # noqa: E402
-from orchestrator.config import load_project      # noqa: E402
+from sdlc.adapters.adk.invoker import build_llm_agent  # noqa: E402
+from sdlc.engine.config import load_project      # noqa: E402
 
 _SAMPLE_DIFF = """diff --git a/app/payments.py b/app/payments.py
 --- a/app/payments.py
@@ -38,9 +38,9 @@ def make_root_agent(step: str):
         "PROJECT_CHECKOUT_DIR",
         os.environ.get("CANDIDATE_APP_DIR",
                        str(REPO_ROOT.parent / "candidate-app")))
-    spec_module = importlib.import_module(f"sdlc_steps.{step}.spec")
+    spec_module = importlib.import_module(f"sdlc.steps.{step}.spec")
 
-    # Per-step build arguments, mirroring orchestrator/driver.py.
+    # Per-step build arguments, mirroring sdlc/bindings.py.
     if step == "coder":
         spec = spec_module.build(project, workspace)
     elif step == "code_reviewer":

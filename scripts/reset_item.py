@@ -32,12 +32,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import os  # noqa: E402
 
-from adapters.repo_host import GitHubRepoHost  # noqa: E402
+from sdlc.adapters.github import GitHubRepoHost  # noqa: E402
 from mcp_server import db
 from mcp_server.vocab import Actor, Decision                      # noqa: E402
-from orchestrator import provisioning          # noqa: E402
-from orchestrator.config import load_project   # noqa: E402
-from orchestrator.steps import branch_for      # noqa: E402
+from sdlc.engine import provisioning          # noqa: E402
+from sdlc.engine.config import load_project   # noqa: E402
+from sdlc.sprint.actions import branch_for      # noqa: E402
 
 
 def main() -> None:

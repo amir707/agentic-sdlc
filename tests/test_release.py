@@ -3,7 +3,7 @@
 The decoupling that matters: `release_queue` is a pure store read, and
 `run_release_loop` drives itself off it — so the release loop is
 resumable and independent of any sprint process (a standalone
-`python -m orchestrator.release` runs the identical loop). These pin the
+`python -m sdlc.app.release` runs the identical loop). These pin the
 queue-selection and the bounded-loop behaviour without touching a live
 release-manager agent.
 """
@@ -11,7 +11,7 @@ release-manager agent.
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import release_flow
+from sdlc.release import flow as release_flow
 
 
 class FakeStore:
@@ -73,7 +73,7 @@ def test_repo_host_error_escalates_the_item_not_the_pass():
     (recreated from baseline) had no PR #3 — the 404 killed the whole
     release workflow. A repo-host failure must escalate THAT item and
     return an outcome the graph can route past."""
-    from adapters.repo_host import RepoHostError
+    from sdlc.adapters.github import RepoHostError
 
     class ExplodingRepoHost:
         def get_pr(self, pr):

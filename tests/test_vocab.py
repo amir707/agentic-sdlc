@@ -53,13 +53,13 @@ def test_no_audit_decision_is_spelled_outside_the_enum():
     literal = re.compile(
         r'(?:\.audit\(\s*[^,]+,\s*|append_audit\([^,]+,\s*[^,]+,\s*|decision=)"([a-z_]+)"')
     offenders = []
-    for pkg in ("orchestrator", "adapters", "sdlc_steps", "mcp_server", "scripts"):
+    for pkg in ("sdlc", "mcp_server", "scripts"):
         for f in (root / pkg).rglob("*.py"):
             for m in literal.finditer(f.read_text()):
                 offenders.append(f"{f.relative_to(root)}: {m.group(1)}")
     assert not offenders, offenders
     # and every enum member is used somewhere (no dead vocabulary)
-    src = "".join(f.read_text() for pkg in ("orchestrator", "adapters", "sdlc_steps", "mcp_server", "scripts")
+    src = "".join(f.read_text() for pkg in ("sdlc", "mcp_server", "scripts")
                   for f in (root / pkg).rglob("*.py"))
     unused = [d.name for d in Decision
               if f"Decision.{d.name}" not in src and f"AuditDecision.{d.name}" not in src

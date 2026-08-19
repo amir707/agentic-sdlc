@@ -48,26 +48,25 @@ structural guarantees in
 
 | Folder | What lives there |
 |---|---|
-| `sdlc_steps/` | **one folder per worker** — everything a worker *is*: its knowledge (`prompts.md`, `policy.yaml`) and its code. Root `policy.yaml` holds shared keys |
-| `orchestrator/` | the process runtime: `definition.py` (the pipeline as data); `planning.py` / `steps.py` / `sprint.py` / `release_flow.py` (assess+pack, the per-item handlers the ADK nodes call, resume dispatch + run loop, the release decision); `governance.py` (the one way an item is escalated/failed/held/bounced); `context.py`; and mechanics (config overlays, invoker + executor ports, git workspace, gate, rejection, dependency graph). `driver.py` is the thin façade binding definition steps to handlers |
-| `projects-config/` | **one folder per governed project**: `project.yaml` (repo, areas, smoke endpoints), `backlog.json`, `.env` (gitignored), and `sdlc_steps/<step>/` overlays mirroring the root hierarchy |
-| `adapters/` | boundary adapters: GitHub REST (`repo_host`), MCP store client, Cloud Run deployer — plus `adapters/adk/`, the ONE package that speaks ADK |
+| `sdlc/steps/` | **one folder per worker** — everything a worker *is*: its knowledge (`prompts.md`, `policy.yaml`) and its code. Root `policy.yaml` holds shared keys |
+| `sdlc/` | **the engine, one package, skimmable by domain**: `definition.py` (THE SDLC as data: steps + the per-item graph), `context.py`, `bindings.py`; `ports/` (what the engine needs from the world — Protocols only); `governance/` (the rules both clocks obey: outcomes, machine gates, the human gate, rejection, markers, schemas); `sprint/` (THE SPRINT CLOCK: planning, per-item actions + pipeline decisions, resume/run flow); `release/` (THE RELEASE CLOCK: one event = one pass over the queue); `engine/` (deterministic mechanics: config overlays, git workspace, provisioning, dependency graph, activity, heartbeat, redaction); `adapters/` (GitHub, gcloud, the store client, and `adk/` — the ONE package that speaks ADK); `app/` (entry points + the one composition root). Each package's `__init__` says what it is |
+| `projects-config/` | **one folder per governed project**: `project.yaml` (repo, areas, smoke endpoints), `backlog.json`, `.env` (gitignored), and `sdlc/steps/<step>/` overlays mirroring the root hierarchy |
 | `mcp_server/` | the delivery-store MCP server — the single source of truth |
-| `tools/` | agent-facing tools: sandboxed workspace (`fs_tools`), diff analysis |
+| `sdlc/tools/` | agent-facing tools: sandboxed workspace (`fs_tools`), diff analysis |
 | `scripts/` | demo conductor, deterministic eval, seeder, setup, resets |
 | `docs/` | architecture, design invariants, ADRs, setup runbook |
 
-Inside `sdlc_steps/`, a worker's code takes one of two shapes —
+Inside `sdlc/steps/`, a worker's code takes one of two shapes —
 `__init__.py` implementations for the **deterministic** workers
 (sprint_packer, verify, preprod_ci, incident_resolver, monitor),
 `spec.py` model+tool wiring for the **reasoning** ones (risk_assessor,
 coder, code_reviewer, approver, release_manager).
 
-Composition per invocation: base `sdlc_steps/<step>/prompts.md` (opens
+Composition per invocation: base `sdlc/steps/<step>/prompts.md` (opens
 with immutable core rules) → project
-`projects-config/<name>/sdlc_steps/<step>/customised-prompt.md` if
+`projects-config/<name>/steps/<step>/customised-prompt.md` if
 present (extends, never overrides) → task payload. Policy resolves the
-same way: step defaults (plus shared `sdlc_steps/policy.yaml`) merged
+same way: step defaults (plus shared `sdlc/steps/policy.yaml`) merged
 with the project's mirrored overrides.
 
 ## Setup
@@ -185,7 +184,7 @@ untouched:
 
 - **Scheduler**: the for-loop driver → a work queue.
 - **Gate**: blocking poll → webhook-resumed suspension (the ADK
-  Workflow expression in `adapters/adk/workflow.py` already renders
+  Workflow expression in `sdlc/adapters/adk/item_workflow.py` already renders
   the pipeline as a resumable graph).
 - **Store**: SQLite → Postgres behind the same MCP tools.
 - **Credentials**: local tokens → workload identity.

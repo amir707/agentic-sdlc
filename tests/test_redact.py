@@ -1,6 +1,6 @@
 """orchestrator/redact: no human-facing text may carry a secret."""
 
-from orchestrator import redact
+from sdlc.engine import redact
 
 
 def test_url_credentials_are_stripped():

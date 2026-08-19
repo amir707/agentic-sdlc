@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.config import ConfigError, load_project
-from orchestrator.dependency_graph import (UnparseableSource, blast_radius,
+from sdlc.engine.config import ConfigError, load_project
+from sdlc.engine.dependency_graph import (UnparseableSource, blast_radius,
                                            build_import_graph,
                                            dependents_closure)
-from tools.diff_analysis import areas_touched, files_touched, flag_coverage
-from sdlc_steps.sprint_packer import pack
+from sdlc.tools.diff_analysis import areas_touched, files_touched, flag_coverage
+from sdlc.steps.sprint_packer import pack
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -110,7 +110,7 @@ def test_broken_source_raises_domain_error_not_syntaxerror(toy_repo):
     assert "line 1" in exc.value.detail
 
 
-# --- tools/diff_analysis -----------------------------------------------------
+# --- sdlc/tools/diff_analysis -----------------------------------------------------
 
 SAMPLE_DIFF = textwrap.dedent("""\
     diff --git a/app/payments.py b/app/payments.py
@@ -261,7 +261,7 @@ def test_setup_scaffolds_a_valid_project_bundle(tmp_path, monkeypatch):
 
     answers = iter(["acme/shop-api", "", "alice,bob", ""])
     monkeypatch.setattr(builtins, "input", lambda prompt="": next(answers))
-    from orchestrator import config
+    from sdlc.engine import config
     monkeypatch.setattr(config, "PROJECTS", tmp_path)
 
     setup._scaffold(tmp_path / "shop-api", "shop-api")

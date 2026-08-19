@@ -9,7 +9,7 @@ the resident services run indefinitely.
 
 from unittest import mock
 
-from adapters.store_client import auth_headers
+from sdlc.adapters.store_client import auth_headers
 
 URL = "https://delivery-store-xyz.a.run.app/mcp"
 

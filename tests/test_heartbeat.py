@@ -3,7 +3,7 @@ local stand-in for Cloud Scheduler until real wake-ups are wired."""
 
 import asyncio
 
-from orchestrator import heartbeat
+from sdlc.engine import heartbeat
 
 
 def test_payload_is_pubsub_shaped_and_numbered():

@@ -11,7 +11,7 @@ is self-sufficient.
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import release_flow
+from sdlc.release import flow as release_flow
 
 
 def test_delegates_to_the_release_service_when_configured(monkeypatch):
@@ -26,7 +26,7 @@ def test_delegates_to_the_release_service_when_configured(monkeypatch):
 
     async def fake_post(url, name):
         posted.append((url, name))
-    import orchestrator.heartbeat as hb
+    import sdlc.engine.heartbeat as hb
     monkeypatch.setattr(hb, "post_event", fake_post)
 
     asyncio.run(release_flow.trigger_release(SimpleNamespace()))

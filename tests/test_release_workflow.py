@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import release_flow
-from adapters.adk import release_workflow as rwf
-from adapters.adk.release_workflow import ADKReleaseExecutor
+from sdlc.release import flow as release_flow
+from sdlc.adapters.adk import release_workflow as rwf
+from sdlc.adapters.adk.release_workflow import ADKReleaseExecutor
 
 
 class Recorder:

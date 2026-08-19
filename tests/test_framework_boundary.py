@@ -9,12 +9,23 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from orchestrator import schemas
-
+from sdlc.governance import schemas
 ROOT = Path(__file__).resolve().parent.parent
 
-CORE_PACKAGES = ("orchestrator", "sdlc_steps", "tools", "mcp_server")
-FRAMEWORK_PREFIXES = ("google.adk", "google.genai", "adapters.adk")
+# The framework-free core: everything under sdlc/ except the adapters
+# (which exist to name frameworks) and app/ (the composition roots), plus
+# the step knowledge, the coder's tools and the store.
+CORE_DIRS = ("sdlc", "mcp_server")
+NON_CORE = (ROOT / "sdlc" / "adapters", ROOT / "sdlc" / "app")
+FRAMEWORK_PREFIXES = ("google.adk", "google.genai", "sdlc.adapters.adk")
+
+
+def _core_files():
+    for d in CORE_DIRS:
+        for py_file in (ROOT / d).rglob("*.py"):
+            if any(py_file.is_relative_to(x) for x in NON_CORE):
+                continue
+            yield py_file
 
 
 def _imports(py_file: Path) -> set[str]:
@@ -28,28 +39,14 @@ def _imports(py_file: Path) -> set[str]:
     return modules
 
 
-# The composition roots are the entry points allowed to choose a framework
-# (they instantiate the adapters and inject them into the core): the sprint
-# orchestrator, the one-pass release entry, and the resident release
-# service (ADK api server hosting the release Workflow).
-COMPOSITION_ROOTS = {
-    ROOT / "orchestrator" / "bootstrap.py",
-    ROOT / "orchestrator" / "__main__.py",
-    ROOT / "orchestrator" / "release.py",
-    ROOT / "orchestrator" / "release_service.py",
-    ROOT / "orchestrator" / "sprint_service.py",
-}
-
-
 def test_core_never_imports_a_framework():
-    for package in CORE_PACKAGES:
-        for py_file in (ROOT / package).rglob("*.py"):
-            if py_file in COMPOSITION_ROOTS:
-                continue
-            for module in _imports(py_file):
-                assert not module.startswith(FRAMEWORK_PREFIXES), (
-                    f"{py_file.relative_to(ROOT)} imports {module!r} — "
-                    "framework code belongs in adapters/adk/ (ADR-0007)")
+    """sdlc/app is the composition root and sdlc/adapters exists to name
+    frameworks; nothing else may (ADR-0007)."""
+    for py_file in _core_files():
+        for module in _imports(py_file):
+            assert not module.startswith(FRAMEWORK_PREFIXES), (
+                f"{py_file.relative_to(ROOT)} imports {module!r} — "
+                "framework code belongs in sdlc/adapters/adk/ (ADR-0007)")
 
 
 def _module_level_imports(py_file: Path) -> set[str]:
@@ -64,29 +61,48 @@ def _module_level_imports(py_file: Path) -> set[str]:
     return modules
 
 
-def test_orchestrator_depends_on_ports_not_adapters():
+def test_core_depends_on_ports_not_adapters():
     """The core talks to the repo host, the store and the deploy tool
-    through orchestrator/ports.py Protocols. A module-level `adapters`
-    import in orchestrator/ (outside the composition roots) is the
-    dependency arrow pointing the wrong way."""
-    for py_file in (ROOT / "orchestrator").rglob("*.py"):
-        if py_file in COMPOSITION_ROOTS:
-            continue
+    through sdlc/ports Protocols. A module-level `sdlc.adapters` import
+    outside sdlc/app and sdlc/adapters is the dependency arrow pointing
+    the wrong way."""
+    for py_file in _core_files():
         for module in _module_level_imports(py_file):
-            assert not module.startswith("adapters"), (
+            assert not module.startswith("sdlc.adapters"), (
                 f"{py_file.relative_to(ROOT)} imports {module!r} at module "
-                "level — depend on orchestrator.ports instead")
+                "level — depend on sdlc.ports instead")
+
+
+def test_the_two_clocks_stay_apart():
+    """sprint/ may hand off to release/ (the trigger seam) but release/
+    never imports sprint/: the release clock must be runnable, testable
+    and deployable without the sprint clock (its own service, its own
+    Workflow). governance/, ports/, definition, context, engine are the
+    shared kernel — neither clock imports the other's internals."""
+    for py_file in (ROOT / "sdlc" / "release").rglob("*.py"):
+        for module in _imports(py_file):
+            assert not module.startswith("sdlc.sprint"), (
+                f"{py_file.relative_to(ROOT)} imports {module!r} — the "
+                "release clock must not depend on the sprint clock")
+    for py_file in list((ROOT / "sdlc" / "governance").rglob("*.py")) + \
+            list((ROOT / "sdlc" / "ports").rglob("*.py")) + \
+            list((ROOT / "sdlc" / "engine").rglob("*.py")) + \
+            [ROOT / "sdlc" / "definition.py", ROOT / "sdlc" / "context.py"]:
+        for module in _imports(py_file):
+            assert not module.startswith(("sdlc.sprint", "sdlc.release",
+                                          "sdlc.app")), (
+                f"{py_file.relative_to(ROOT)} imports {module!r} — the "
+                "shared kernel must not depend on a clock or the app")
 
 
 def test_concrete_adapters_satisfy_the_ports():
     """Structural typing, checked mechanically: every method a port
     names exists on the adapter that is injected for it."""
     import inspect
-    from adapters import deploy
-    from adapters.repo_host import GitHubRepoHost
-    from adapters.store_client import DeliveryStore
-    from orchestrator import ports
-
+    from sdlc.adapters import gcloud as deploy
+    from sdlc.adapters.github import GitHubRepoHost
+    from sdlc.adapters.store_client import DeliveryStore
+    from sdlc.ports import world as ports
     def names(proto):
         return {n for n, v in vars(proto).items()
                 if callable(v) and not n.startswith("_")}
@@ -97,11 +113,11 @@ def test_concrete_adapters_satisfy_the_ports():
 
 
 def test_workflow_renders_the_definition_graph_exactly():
-    """The executing ADK Workflow is built FROM orchestrator/definition.py's
+    """The executing ADK Workflow is built FROM sdlc/definition.py's
     PER_ITEM_EDGES — it renders the definition, it does not redefine it.
     (Graph-internal consistency is pinned in test_definition.py.)"""
-    from adapters.adk.workflow import EDGE_TABLE
-    from orchestrator.definition import PER_ITEM_EDGES
+    from sdlc.adapters.adk.item_workflow import EDGE_TABLE
+    from sdlc.definition import PER_ITEM_EDGES
     assert list(EDGE_TABLE) == list(PER_ITEM_EDGES)
 
 
@@ -110,7 +126,7 @@ def test_workflow_constructs_and_validates():
     per-item workflow — construction only, no execution/model calls."""
     from unittest.mock import MagicMock
 
-    from adapters.adk.workflow import build_item_workflow
+    from sdlc.adapters.adk.item_workflow import build_item_workflow
 
     ctx = MagicMock()
     ctx.project.policy.return_value = {"max_fix_iterations": 2,

@@ -39,25 +39,25 @@ mcp:
 
 monitor:
 	$(require_project)
-	$(PYTHON) -m sdlc_steps.monitor --project $(PROJECT) \
-	  --url $$($(PYTHON) -m adapters.deploy url)
+	$(PYTHON) -m sdlc.steps.monitor --project $(PROJECT) \
+	  --url $$($(PYTHON) -m sdlc.adapters.gcloud url)
 
 orchestrate:
 	$(require_project)
-	$(PYTHON) -m orchestrator --project $(PROJECT) --parallel $(PARALLEL)
+	$(PYTHON) -m sdlc.app.sprint --project $(PROJECT) --parallel $(PARALLEL)
 
 # ONE release pass over store state (Workstream B): the event-driven unit
 # of release, independent of a sprint run. Repeated invocation is the
 # trigger's job (Cloud Scheduler / webhook in the cloud; cron/loop locally).
 release:
 	$(require_project)
-	$(PYTHON) -m orchestrator.release --project $(PROJECT)
+	$(PYTHON) -m sdlc.app.release --project $(PROJECT)
 
 # The RESIDENT release manager: stays awake listening; runs one release
 # pass per event (Pub/Sub push in the cloud, HTTP POST locally).
 release-service:
 	$(require_project)
-	$(PYTHON) -m orchestrator.release_service --project $(PROJECT) --heartbeat-minutes $(HEARTBEAT)
+	$(PYTHON) -m sdlc.app.release_service --project $(PROJECT) --heartbeat-minutes $(HEARTBEAT)
 
 # The RESIDENT sprint orchestrator: stays awake listening; one sprint
 # resume pass per event (each awaiting gate gets exactly one look).
@@ -65,12 +65,12 @@ release-service:
 # release to the resident release service (its log owns release narration).
 orchestrate-service:
 	$(require_project)
-	$(PYTHON) -m orchestrator.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT) --release-url "$(RELEASE_URL)"
+	$(PYTHON) -m sdlc.app.sprint_service --project $(PROJECT) --parallel $(PARALLEL) --heartbeat-minutes $(HEARTBEAT) --release-url "$(RELEASE_URL)"
 
 deploy-baseline:
 	$(require_project)
-	PROJECT_CHECKOUT_DIR=$$($(PYTHON) -m orchestrator.provisioning --project $(PROJECT)) \
-	  $(PYTHON) -m adapters.deploy baseline
+	PROJECT_CHECKOUT_DIR=$$($(PYTHON) -m sdlc.engine.provisioning --project $(PROJECT)) \
+	  $(PYTHON) -m sdlc.adapters.gcloud baseline
 
 # FULL demo reset: candidate-app main + branches + baseline traffic + store
 reset-demo:

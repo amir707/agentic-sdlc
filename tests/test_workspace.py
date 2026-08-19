@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.workspace import Workspace, WorkspaceFactory
+from sdlc.engine.workspace import Workspace, WorkspaceFactory
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -122,7 +122,7 @@ def test_engine_provisions_and_deprovisions_its_own_checkout(
     origin, _ = repos
     monkeypatch.delenv("CANDIDATE_APP_DIR", raising=False)
     monkeypatch.setenv("AGENTIC_SDLC_SCRATCH", str(tmp_path / "scratch"))
-    from orchestrator import provisioning
+    from sdlc.engine import provisioning
 
     ws = provisioning.provision("candidate-app", str(origin))
     assert (ws.dir / ".git").exists()
@@ -208,7 +208,7 @@ def test_worktree_resumes_branch_held_by_base_checkout(repos):
 # that is how a PAT ends up in terminal scrollback and pasted logs.
 
 def test_failed_clone_redacts_the_token(tmp_path, monkeypatch):
-    from orchestrator import provisioning
+    from sdlc.engine import provisioning
 
     monkeypatch.setenv("AGENTIC_SDLC_SCRATCH", str(tmp_path / "scratch"))
     secret = "github_pat_SUPERSECRET"

@@ -12,24 +12,24 @@ description: Add or modify a step, policy, back-edge, or agent in the
 
 1. `docs/design-invariants.md` — what must stay true, and which test
    enforces each invariant.
-2. `orchestrator/definition.py` — the pipeline as data: phases, steps
+2. `sdlc/definition.py` — the pipeline as data: phases, steps
    typed reasoning|deterministic|gate, back-edges with policy keys.
 3. `docs/adr/0007-framework-as-implementation-detail.md` — why the
    SDLC core never imports ADK.
 
 ## Adding a new step
 
-1. Declare it in `orchestrator/definition.py` (phase, type, and any
+1. Declare it in `sdlc/definition.py` (phase, type, and any
    back-edge with the policy key that bounds it). The definition is
    frozen data — no logic.
-2. Create `sdlc_steps/<step_name>/` (underscore names only):
+2. Create `sdlc/steps/<step_name>/` (underscore names only):
    - `prompts.md` — base prompt (reasoning steps only)
    - `policy.yaml` — engine DEFAULTS; must stay project-neutral
      (empty lists/values, never a real path, area, or endpoint)
    - `spec.py` — AgentSpec factory `build(project, ...)` (reasoning)
      or plain functions (deterministic)
 3. Bind the name in `HANDLERS` at the bottom of
-   `orchestrator/driver.py` — the explicit definition→execution map.
+   `sdlc/bindings.py` — the explicit definition→execution map.
 4. Reasoning step? Add a 2-line dev-UI stub under
    `tests/debug/adk_web/<step_name>/` (copy an existing one; they all
    delegate to `_bootstrap.py` so the dev UI runs the REAL spec).

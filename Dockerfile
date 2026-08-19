@@ -1,12 +1,12 @@
 # One image, two roles — the command chooses at deploy time:
 #   delivery store (Cloud Run service): the default CMD below
-#   orchestrator  (Cloud Run Job):      python -m orchestrator --project ...
+#   orchestrator  (Cloud Run Job):      python -m sdlc.app.sprint --project ...
 # Secrets are NEVER baked in (.env is dockerignored); they arrive as
 # Secret Manager references on the service/job.
 FROM python:3.12-slim
 
 # git: engine-provisioned checkouts; gcloud: the deterministic deploy
-# tool (adapters/deploy.py shells it; builds happen in Cloud Build).
+# tool (sdlc/adapters/gcloud.py shells it; builds happen in Cloud Build).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git curl gnupg ca-certificates \
     && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \

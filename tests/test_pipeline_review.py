@@ -7,9 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import governance, pipeline, steps
-from orchestrator.dependency_graph import UnparseableSource
-from orchestrator.pipeline import PipelineState, Route
+from sdlc import governance
+from sdlc.governance import outcomes
+
+from sdlc.sprint import pipeline
+
+from sdlc.sprint import actions as steps
+from sdlc.engine.dependency_graph import UnparseableSource
+from sdlc.sprint.pipeline import PipelineState, Route
 
 
 class Ctx:
@@ -43,7 +48,7 @@ def quiet(monkeypatch):
 
     async def no_reject(*a, **k):
         pass
-    monkeypatch.setattr(governance, "reject", no_reject)
+    monkeypatch.setattr(outcomes, "reject", no_reject)
 
 
 def _review(kind, monkeypatch):

@@ -24,7 +24,7 @@ from google.adk.workflow import Workflow
 from google.genai import types
 
 from sdlc.release import flow as release_flow
-from sdlc_steps import incident_resolver
+from sdlc.steps import incident_resolver
 
 _APP_NAME = "agentic_sdlc_release"
 

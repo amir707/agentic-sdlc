@@ -17,10 +17,10 @@ Knowledge splits by OWNER, with an explicit prompt-vs-structure line:
 | Layer | Owner | Location | Injected? |
 |---|---|---|---|
 | Design invariants | system | `docs/design-invariants.md` | never — enforced structurally |
-| Step base prompt (opens with core rules) | system | `sdlc_steps/<step>/prompts.md` | always, first |
-| Step policy defaults | system | `sdlc_steps/<step>/policy.yaml`; cross-step keys in `sdlc_steps/policy.yaml`; pipeline flow control in `sdlc_steps/orchestrator/policy.yaml` | read by deterministic tools |
-| Project customised prompt | project | `projects-config/<name>/sdlc_steps/<step>/customised-prompt.md` | after base; extends only |
-| Project policy overrides | project | `projects-config/<name>/sdlc_steps/<step>/policy.yaml` | merged over step defaults |
+| Step base prompt (opens with core rules) | system | `sdlc/steps/<step>/prompts.md` | always, first |
+| Step policy defaults | system | `sdlc/steps/<step>/policy.yaml`; cross-step keys in `sdlc/steps/policy.yaml`; pipeline flow control in `sdlc/steps/orchestrator/policy.yaml` | read by deterministic tools |
+| Project customised prompt | project | `projects-config/<name>/steps/<step>/customised-prompt.md` | after base; extends only |
+| Project policy overrides | project | `projects-config/<name>/steps/<step>/policy.yaml` | merged over step defaults |
 | Project definition & seed | project | `projects-config/<name>/project.yaml`, `backlog.json`, `.env` | read by orchestrator/tools/adapters |
 | ADRs (the "why") | system | `docs/adr/` | never — for humans and judges |
 

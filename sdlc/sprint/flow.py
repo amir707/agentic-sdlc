@@ -24,7 +24,7 @@ from sdlc.governance.rejection import Rejection
 from sdlc.release.flow import trigger_release
 from sdlc.sprint.actions import branch_for, open_pr, run_coder
 from sdlc.engine.workspace import WorkspaceFactory
-from sdlc_steps import incident_resolver
+from sdlc.steps import incident_resolver
 
 
 async def _escalation_override(ctx: "RunContext", item: dict,

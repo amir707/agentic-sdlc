@@ -11,8 +11,8 @@ from mcp_server.vocab import Actor, Decision
 
 from sdlc.context import RunContext
 from sdlc.engine.dependency_graph import build_import_graph
-from sdlc_steps import sprint_packer
-from sdlc_steps.risk_assessor import spec as assessor_spec
+from sdlc.steps import sprint_packer
+from sdlc.steps.risk_assessor import spec as assessor_spec
 
 
 async def run_risk_assessor(ctx: RunContext) -> dict[str, dict]:
