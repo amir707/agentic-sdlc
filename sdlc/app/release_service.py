@@ -27,8 +27,11 @@ import os
 from sdlc.app import bootstrap
 def main() -> None:
     p = bootstrap.parser("Run the resident release manager (event-driven).")
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8788)
+    # Cloud Run injects PORT and expects the process to bind 0.0.0.0;
+    # locally the loopback + a fixed port. Both are the defaults, so no
+    # flag is needed in either place.
+    p.add_argument("--host", default="0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8788)))
     p.add_argument("--heartbeat-minutes", type=float, default=5.0,
                    help="self-wake interval until Scheduler/webhook are "
                         "wired (0 disables)")

@@ -338,8 +338,9 @@ gcloud scheduler jobs create http orchestrator-heartbeat \
 gcloud scheduler jobs pause orchestrator-heartbeat --location "$REGION"
 ```
 
-The production successor remains a GitHub webhook (issue_comment ->
-jobs.run), so the /approve comment itself triggers the resuming run.
+The webhook itself is now built for the RESIDENT services (§13a); for
+the one-shot Job shape, the successor is the same hook aimed at a relay
+that runs jobs.run.
 
 ## 11. Stop a cloud orchestrator run
 
@@ -397,6 +398,85 @@ resolver** on recovery (the held-PR-can-move event). At-least-once and
 duplicate deliveries are safe: the pass is stateless over the store, so
 a spurious wake-up costs one read and "queue empty". The sprint
 orchestrator only has to drive items to `status=queued`.
+
+## 13a. GitHub webhook → trigger: the real event source (retires the heartbeat)
+
+The heartbeat was the local stand-in for real events. The real one is a
+GitHub webhook: a gate comment (`/approve`, `/reject`, `/hold`) on a PR,
+or a new PR head, wakes the resident services immediately. The services
+mount `POST /webhooks/github` when `GITHUB_WEBHOOK_SECRET` is set
+(project `.env`); the route verifies GitHub's HMAC, filters to the
+events the pipeline reacts to, and nudges the SAME trigger endpoints the
+heartbeat nudges (`sdlc/app/webhook.py`) — the sprint service also
+forwards to the release service's trigger when `--release-url` is set,
+because an approval both resumes the gate and queues an item.
+
+```bash
+# 0. a secret, shared by GitHub and the services (project .env)
+python3 -c 'import secrets; print("GITHUB_WEBHOOK_SECRET=" + secrets.token_urlsafe(24))' \
+  >> projects-config/candidate-app-2/.env
+
+# 1. LOCAL: GitHub cannot reach localhost — forward deliveries with the
+#    gh webhook extension (one-time: gh extension install cli/gh-webhook)
+set -a; source projects-config/candidate-app-2/.env; set +a
+gh webhook forward --repo amir707/candidate-app-2 \
+  --events issue_comment,pull_request \
+  --url http://127.0.0.1:8789/webhooks/github --secret "$GITHUB_WEBHOOK_SECRET"
+# in other terminals, the services — heartbeat can now be 0 for the sprint
+# (the release service keeps a heartbeat: confidence windows need a timer)
+make orchestrate-service PROJECT=candidate-app-2 HEARTBEAT=0 \
+  RELEASE_URL=http://127.0.0.1:8788/apps/release/trigger/pubsub
+make release-service PROJECT=candidate-app-2 HEARTBEAT=10
+# comment /approve on a PR → the sprint service logs
+#   [webhook] github:comment:<pr> — nudging 2 trigger(s)
+# and the gate takes its one authenticated look within a second.
+
+# 2. CLOUD: the RESIDENT services as Cloud Run services (the Job in 9.5
+#    is the one-shot shape; webhooks need a listener). Same image, same
+#    secrets; PORT is injected and honored; heartbeat 0 for the sprint,
+#    a timer for release; the sprint delegates release to the release
+#    service's trigger URL. --allow-unauthenticated: GitHub cannot carry
+#    a Google identity (tradeoff below); the webhook route is HMAC-gated.
+printf '%s' "$(grep '^GITHUB_WEBHOOK_SECRET=' projects-config/candidate-app-2/.env | cut -d= -f2-)" \
+  | gcloud secrets create GITHUB_WEBHOOK_SECRET --data-file=-
+gcloud secrets add-iam-policy-binding GITHUB_WEBHOOK_SECRET \
+  --member="serviceAccount:$SA_EMAIL" --role=roles/secretmanager.secretAccessor
+COMMON_ENV="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,LOG_FORMAT=json,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app-2"
+COMMON_SECRETS="ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest"
+gcloud run deploy release-service --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" --allow-unauthenticated \
+  --min-instances=0 --max-instances=1 --memory=2Gi --cpu=2 --timeout=3600 \
+  --command=python --args=-m,sdlc.app.release_service,--project,candidate-app-2,--heartbeat-minutes,60 \
+  --set-env-vars="$COMMON_ENV" --set-secrets="$COMMON_SECRETS"
+RELEASE_URL="$(gcloud run services describe release-service --region "$REGION" --format='value(status.url)')/apps/release/trigger/pubsub"
+gcloud run deploy sprint-service --image "$IMAGE" --region "$REGION" \
+  --service-account "$SA_EMAIL" --allow-unauthenticated \
+  --min-instances=0 --max-instances=1 --memory=2Gi --cpu=2 --timeout=3600 \
+  --command=python --args=-m,sdlc.app.sprint_service,--project,candidate-app-2,--parallel,2,--heartbeat-minutes,0,--release-url,"$RELEASE_URL" \
+  --set-env-vars="$COMMON_ENV" --set-secrets="$COMMON_SECRETS"
+# (min-instances=0: a webhook delivery cold-starts the service; the
+#  route answers 202 within GitHub's 10 s — the pass runs after.)
+
+# 3. point the GitHub hook at the sprint service
+SPRINT_URL=$(gcloud run services describe sprint-service --region "$REGION" --format='value(status.url)')
+gh api repos/amir707/candidate-app-2/hooks -X POST \
+  -f name=web -F active=true \
+  -f 'events[]=issue_comment' -f 'events[]=pull_request' \
+  -f config[url]="$SPRINT_URL/webhooks/github" \
+  -f config[content_type]=json -f config[secret]="$GITHUB_WEBHOOK_SECRET"
+# GitHub sends a `ping` on creation; the route answers {"pong": true}.
+```
+
+Exposure, stated plainly: GitHub cannot carry a Google identity, so a
+service that receives webhooks must accept unauthenticated ingress on
+that path — and Cloud Run IAM is per SERVICE, so its Pub/Sub trigger
+path becomes reachable too. What that exposes is a NUDGE: the trigger
+runs one idempotent pass (a store read and a few repo-host lookups when
+nothing changed) and no authority — the gate still reads the allowlisted
+comment itself (ADR-0005). The webhook route stays HMAC-gated regardless.
+Production successor if that cost surface matters: a tiny relay (Cloud
+Function/Run, allow-unauthenticated, HMAC-verifying) that publishes to
+Pub/Sub, keeping the services IAM-locked behind a push subscription.
 
 ## 12. Tear down: stop the hourly bill after testing
 

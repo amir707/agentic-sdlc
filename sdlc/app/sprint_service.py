@@ -29,8 +29,11 @@ from sdlc.app import bootstrap
 def main() -> None:
     p = bootstrap.parser("Run the resident sprint orchestrator (event-driven).")
     p.add_argument("--parallel", type=int, default=1)
-    p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8789)
+    # Cloud Run injects PORT and expects the process to bind 0.0.0.0;
+    # locally the loopback + a fixed port. Both are the defaults, so no
+    # flag is needed in either place.
+    p.add_argument("--host", default="0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8789)))
     p.add_argument("--heartbeat-minutes", type=float, default=5.0,
                    help="self-wake interval until Scheduler/webhook are "
                         "wired (0 disables)")
@@ -54,7 +57,10 @@ def main() -> None:
 
     bootstrap.serve_resident(
         "sprint_app", "sprint", args.host, args.port, args.heartbeat_minutes,
-        args.project, describe="one resume pass per event")
+        args.project, describe="one resume pass per event",
+        # an approval both resumes the gate here and queues an item the
+        # release service should decide: the webhook nudges both
+        extra_targets=[args.release_url] if args.release_url else [])
 
 
 if __name__ == "__main__":
