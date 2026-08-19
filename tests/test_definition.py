@@ -4,9 +4,9 @@ key breaks loudly here instead of mid-demo."""
 
 from pathlib import Path
 
-from orchestrator.config import load_project
-from orchestrator import driver
-from orchestrator.definition import GATE, REASONING, SDLC
+from sdlc.engine.config import load_project
+from sdlc import bindings as driver
+from sdlc.definition import GATE, REASONING, SDLC
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -18,15 +18,15 @@ def test_every_step_has_a_handler():
 def test_every_step_has_a_knowledge_folder():
     for step in SDLC.all_steps():
         if step.kind == GATE:
-            continue  # the gate's mechanics live in orchestrator/gate.py
-        assert (ROOT / "sdlc_steps" / step.name).is_dir(), step.name
+            continue  # the gate's mechanics live in sdlc/governance/gate.py
+        assert (ROOT / "sdlc" / "steps" / step.name).is_dir(), step.name
 
 
 def test_reasoning_steps_have_prompts_and_specs():
     for step in SDLC.all_steps():
         if step.kind != REASONING:
             continue
-        folder = ROOT / "sdlc_steps" / step.name
+        folder = ROOT / "sdlc" / "steps" / step.name
         assert (folder / "prompts.md").exists(), step.name
         assert (folder / "spec.py").exists(), step.name
 
@@ -52,7 +52,7 @@ def test_assessor_resumes_instead_of_reassessing():
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
-    from orchestrator.driver import RunContext, run_risk_assessor
+    from sdlc.bindings import RunContext, run_risk_assessor
 
     items = [{"id": "PAY-101", "title": "a"}, {"id": "CAT-201", "title": "b"}]
     existing = [{"item_id": "PAY-101", "risk": "high", "effort": "M",
@@ -75,7 +75,7 @@ def test_assessor_resumes_instead_of_reassessing():
 
     async def fake_invoke(spec, message):
         store.calls.append(spec.name)
-        from orchestrator.invoker import Invocation
+        from sdlc.ports.agents import Invocation
         return Invocation(text="", input_tokens=1, output_tokens=1)
 
     ctx = RunContext(project=MagicMock(), store=store, repo_host=MagicMock(),
@@ -93,7 +93,7 @@ def test_activity_board_tracks_busy_and_durations(tmp_path):
     import json
     import time
 
-    from orchestrator.activity import (ActivityBoard, read_board,
+    from sdlc.engine.activity import (ActivityBoard, read_board,
                                        read_recent_history)
 
     board = ActivityBoard(tmp_path / ".activity.json")
@@ -119,7 +119,7 @@ def test_activity_board_tracks_busy_and_durations(tmp_path):
 
 
 def test_error_summaries_are_one_actionable_line():
-    from orchestrator.errors import one_line
+    from sdlc.engine.errors import one_line
 
     daily = Exception(
         "429 RESOURCE_EXHAUSTED. ... 'quotaId': "
@@ -147,7 +147,7 @@ def test_stage_markers_key_on_head_sha():
     """Bot comments carry invisible idempotency markers keyed to the
     head SHA: a restart skips completed stages; a new commit repeats
     them (the SHA changed)."""
-    from orchestrator.pr_markers import find_marker as _find_marker, marker as _marker
+    from sdlc.governance.markers import find_marker as _find_marker, marker as _marker
 
     sha_a, sha_b = "abc123", "def456"
     comments = [
@@ -166,7 +166,7 @@ def test_stage_markers_key_on_head_sha():
 # --- the per-item graph is ONE definition -----------------------------------------
 
 def test_every_per_item_step_is_a_graph_node_and_every_back_edge_is_a_routed_cycle():
-    from orchestrator.definition import PER_ITEM_EDGES, Route, per_item_nodes
+    from sdlc.definition import PER_ITEM_EDGES, Route, per_item_nodes
     nodes = set(per_item_nodes())
     assert {s.name for s in SDLC.per_item} <= nodes
     for step in SDLC.per_item:
@@ -183,7 +183,7 @@ def test_every_per_item_step_is_a_graph_node_and_every_back_edge_is_a_routed_cyc
 
 def test_terminals_are_store_statuses_and_every_other_node_has_a_way_out():
     from mcp_server.vocab import ItemStatus
-    from orchestrator.definition import PER_ITEM_EDGES, TERMINALS, per_item_nodes
+    from sdlc.definition import PER_ITEM_EDGES, TERMINALS, per_item_nodes
     assert set(TERMINALS) <= {s.value for s in ItemStatus}
     sources = {src for src, _, _ in PER_ITEM_EDGES}
     for node in per_item_nodes():
@@ -194,7 +194,7 @@ def test_terminals_are_store_statuses_and_every_other_node_has_a_way_out():
 
 
 def test_every_route_is_used_and_cycles_carry_routes():
-    from orchestrator.definition import PER_ITEM_EDGES, Route
+    from sdlc.definition import PER_ITEM_EDGES, Route
     used = {r for _, _, r in PER_ITEM_EDGES if r is not None}
     assert used == set(Route)
     # unrouted edges alone must form NO cycle (engines reject unconditional cycles)

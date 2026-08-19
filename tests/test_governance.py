@@ -10,8 +10,9 @@ drift again.
 import asyncio
 from types import SimpleNamespace
 
-from orchestrator import governance
-from orchestrator.rejection import Rejection
+from sdlc import governance
+from sdlc.governance import outcomes
+from sdlc.governance.rejection import Rejection
 
 
 class FakeCtx:
@@ -64,7 +65,7 @@ def test_bounce_to_coder_keeps_status_but_to_backlog_rejects(monkeypatch):
 
     async def fake_reject(store, repo_host, rejection, actor):
         seen.append((rejection.reason_code, actor))
-    monkeypatch.setattr(governance, "reject", fake_reject)
+    monkeypatch.setattr(outcomes, "reject", fake_reject)
 
     ctx = FakeCtx()
     asyncio.run(governance.bounce(

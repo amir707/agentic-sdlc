@@ -11,6 +11,8 @@ Skim the tree and you have the architecture:
   sprint/         THE SPRINT CLOCK: planning, per-item actions + pipeline, resume/run flow
   release/        THE RELEASE CLOCK: one event = one pass over the queue
   engine/         deterministic mechanics, no domain rules (config, git, provisioning, ...)
+  steps/          one folder per worker: its knowledge (prompts, policy) and code
+  tools/          the coder's sandboxed tools — its entire effect surface (G2)
   adapters/       concrete implementations of ports (GitHub, gcloud, the store, ADK)
   app/            entry points + the ONE composition root (bootstrap)
 

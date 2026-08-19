@@ -39,7 +39,7 @@ that leave agents and the MCP surface untouched.
 
 ## Amendment (parallel coders)
 
-`python -m orchestrator --parallel N` fans agent-implemented items out
+`python -m sdlc.app.sprint --parallel N` fans agent-implemented items out
 to up to N concurrent coders, each in its own git worktree
 (`WorkspaceFactory` — a checkout is a cache of GitHub state, so nothing
 needs to share one), with preprod CI serialized behind a lock (one

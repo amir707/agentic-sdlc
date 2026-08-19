@@ -1,15 +1,15 @@
 """Project bundle loading: prompts and policies via the overlay pattern.
 
 The engine is project-agnostic. Everything about one governed project
-lives under projects-config/<name>/, mirroring the root sdlc_steps/
+lives under projects-config/<name>/, mirroring the root sdlc/steps/
 hierarchy:
 
-- prompt for a step   = sdlc_steps/<step>/prompts.md
-                        + projects-config/<name>/sdlc_steps/<step>/customised-prompt.md (if present)
-- policy for a step   = sdlc_steps/policy.yaml            (shared defaults)
-                        <- sdlc_steps/<step>/policy.yaml   (step defaults)
-                        <- config/.../sdlc_steps/policy.yaml        (project shared overrides)
-                        <- config/.../sdlc_steps/<step>/policy.yaml (project step overrides)
+- prompt for a step   = sdlc/steps/<step>/prompts.md
+                        + projects-config/<name>/steps/<step>/customised-prompt.md (if present)
+- policy for a step   = sdlc/steps/policy.yaml            (shared defaults)
+                        <- sdlc/steps/<step>/policy.yaml   (step defaults)
+                        <- config/.../steps/policy.yaml        (project shared overrides)
+                        <- config/.../steps/<step>/policy.yaml (project step overrides)
                         (later layers deep-merge over earlier ones)
 
 `load_project` validates the bundle up front so a malformed config
@@ -22,7 +22,7 @@ from pathlib import Path
 import yaml
 
 from sdlc.engine.paths import REPO_ROOT as ROOT  # noqa: E402
-SDLC_STEPS = ROOT / "sdlc_steps"
+SDLC_STEPS = ROOT / "sdlc" / "steps"
 PROJECTS = ROOT / "projects-config"
 
 
@@ -62,14 +62,23 @@ class ProjectConfig:
     smoke_endpoints: dict[str, str] = field(default_factory=dict)
     _policies: dict[str, dict] = field(default_factory=dict)
 
+    @property
+    def overlays(self) -> Path:
+        """The bundle's step overlays: projects-config/<name>/steps/,
+        mirroring the engine's sdlc/steps/. Bundles scaffolded before the
+        rename used sdlc_steps/ — still honored when present."""
+        legacy = self.project_dir / "sdlc_steps"
+        current = self.project_dir / "steps"
+        return legacy if legacy.exists() and not current.exists() else current
+
     def policy(self, step: str) -> dict:
         """Resolved policy for one step (shared + step + project overlays)."""
         if step not in self._policies:
             layers = [
                 _read_yaml(SDLC_STEPS / "policy.yaml"),
                 _read_yaml(SDLC_STEPS / step / "policy.yaml"),
-                _read_yaml(self.project_dir / "sdlc_steps" / "policy.yaml"),
-                _read_yaml(self.project_dir / "sdlc_steps" / step / "policy.yaml"),
+                _read_yaml(self.overlays / "policy.yaml"),
+                _read_yaml(self.overlays / step / "policy.yaml"),
             ]
             merged: dict = {}
             for layer in layers:
@@ -87,7 +96,7 @@ class ProjectConfig:
         if not base.exists():
             raise ConfigError(f"no base prompt for step {step!r} ({base})")
         parts = [base.read_text()]
-        custom = (self.project_dir / "sdlc_steps" / step / "customised-prompt.md")
+        custom = self.overlays / step / "customised-prompt.md"
         if custom.exists():
             parts.append(custom.read_text())
         return "\n\n".join(parts)
@@ -133,7 +142,7 @@ def _validate(config: ProjectConfig) -> None:
     if not config.policy("approver").get("approvers"):
         raise ConfigError(
             f"project {config.name!r} has no approvers — set them in "
-            f"projects-config/{config.name}/sdlc_steps/approver/policy.yaml")
+            f"projects-config/{config.name}/steps/approver/policy.yaml")
 
     packer = config.policy("sprint_packer")
     for key in ("risk_points", "risk_budget", "token_budget", "reviewer_capacity"):

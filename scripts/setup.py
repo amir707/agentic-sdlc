@@ -176,7 +176,7 @@ Run a sprint with:
 
 ## Extending per step (overlays, all optional)
 
-Mirror the engine's step layout under `sdlc_steps/<step>/`:
+Mirror the engine's step layout under `steps/<step>/`:
 
 - `customised-prompt.md` — appended to the engine's base prompt for
   that step; extends, never overrides its core rules.
@@ -189,12 +189,12 @@ Mirror the engine's step layout under `sdlc_steps/<step>/`:
   - `verify/policy.yaml` -> `sensitive_areas` (areas that force a
     risk floor)
   - `sprint_packer/policy.yaml` -> `risk_budget`, `token_budget`
-  - `sdlc_steps/policy.yaml` (shared) -> `flag_required_min_risk`:
+  - `sdlc/steps/policy.yaml` (shared) -> `flag_required_min_risk`:
     medium+ risk changes must ship behind a feature flag. If this repo
     has no flag facility yet, set it to `high` until one exists —
     otherwise verify blocks medium-risk merges it cannot satisfy.
 
-The full step list lives in the engine's `sdlc_steps/`; every step
+The full step list lives in the engine's `sdlc/steps/`; every step
 with a `prompts.md` accepts both overlay files. See
 `docs/architecture.md` (knowledge architecture) for the composition
 order.
@@ -225,7 +225,7 @@ def _scaffold(project_dir: Path, name: str) -> None:
         name=name, service=service))
     (project_dir / "backlog.json").write_text(
         SAMPLE_BACKLOG.format(default_area=default_area))
-    approver_dir = project_dir / "sdlc_steps" / "approver"
+    approver_dir = project_dir / "steps" / "approver"
     approver_dir.mkdir(parents=True)
     (approver_dir / "policy.yaml").write_text(
         "# Who may decide the human gate (/approve, /reject, /hold).\n"
@@ -387,7 +387,7 @@ def main() -> None:
             # provisions its own (same as make deploy-baseline)
             provision = subprocess.run(
                 [str(ROOT / ".venv" / "bin" / "python"), "-m",
-                 "orchestrator.provisioning", "--project", args.project],
+                 "sdlc.engine.provisioning", "--project", args.project],
                 cwd=ROOT, capture_output=True, text=True, timeout=300)
             if provision.returncode != 0:
                 fail("could not provision the checkout",
@@ -405,7 +405,7 @@ def main() -> None:
                  "make the governed repo deployable first (see the "
                  "bundle README: 'What the governed repo must provide')")
         deploy = subprocess.run(
-            [str(ROOT / ".venv" / "bin" / "python"), "-m", "adapters.deploy",
+            [str(ROOT / ".venv" / "bin" / "python"), "-m", "sdlc.adapters.gcloud",
              "baseline"], cwd=ROOT)
         if deploy.returncode != 0:
             fail("baseline deploy failed",

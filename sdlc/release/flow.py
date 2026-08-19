@@ -23,7 +23,7 @@ from sdlc.engine.dependency_graph import UnparseableSource
 from sdlc.engine.json_util import extract_json
 from sdlc.ports.world import DeployError, RepoHostError
 from sdlc.governance.gates import preprod_passed_for_head, run_preprod_ci, verify_once
-from sdlc_steps.release_manager import spec as rm_spec
+from sdlc.steps.release_manager import spec as rm_spec
 
 
 async def release_queue(ctx: RunContext) -> list[dict]:

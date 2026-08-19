@@ -1,6 +1,6 @@
 """Approval-gate tests: command parsing and the identity-checked scan."""
 
-from orchestrator.gate import parse_command, scan
+from sdlc.governance.gate import parse_command, scan
 
 APPROVERS = ["amir707"]
 
@@ -77,7 +77,7 @@ class _StubStore:
 
 import asyncio
 
-from orchestrator.gate import check_decision
+from sdlc.governance.gate import check_decision
 
 
 def test_check_decision_is_one_authenticated_look():

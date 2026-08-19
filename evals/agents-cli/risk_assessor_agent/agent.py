@@ -23,9 +23,9 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(REPO_ROOT / ".env")
 load_dotenv(REPO_ROOT / "projects-config" / "candidate-app" / ".env")
 
-from adapters.adk.invoker import build_llm_agent  # noqa: E402
-from orchestrator.config import load_project      # noqa: E402
-from sdlc_steps.risk_assessor import spec as risk_assessor_spec  # noqa: E402
+from sdlc.adapters.adk.invoker import build_llm_agent  # noqa: E402
+from sdlc.engine.config import load_project      # noqa: E402
+from sdlc.steps.risk_assessor import spec as risk_assessor_spec  # noqa: E402
 
 _project = load_project("candidate-app")
 root_agent = build_llm_agent(risk_assessor_spec.build(_project))

@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from mcp_server import db                      # noqa: E402
 from mcp_server.report import render           # noqa: E402
 from mcp_server.vocab import Decision          # noqa: E402
-from orchestrator.activity import read_board, read_recent_history  # noqa: E402
+from sdlc.engine.activity import read_board, read_recent_history  # noqa: E402
 
 # --- presentation-only color layer -------------------------------------
 # The status TEXT is generated plain everywhere (files, the store's

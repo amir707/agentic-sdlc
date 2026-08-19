@@ -13,7 +13,7 @@ from mcp_server.vocab import Actor, Decision
 from sdlc.context import RunContext
 from sdlc.governance.markers import find_marker, marker
 from sdlc.ports.world import DeployError
-from sdlc_steps import preprod_ci, verify as verify_step
+from sdlc.steps import preprod_ci, verify as verify_step
 
 
 async def verify_once(ctx: RunContext, item: dict,

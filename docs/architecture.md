@@ -86,7 +86,7 @@ flowchart LR
 | Release manager | reasoning agent (Gemini) | weighs incidents, closures, confidence windows |
 | Synthetic monitor | deterministic prober | threshold check on a sliding window |
 | Incident resolver | deterministic tool | hysteresis rule; separate from detection by role |
-| Orchestrator | Python driver (planning) + two ADK Workflows (per-item, release) | the per-item pipeline and the release pass each run as their own ADK graph — separate control loops with separate clocks; the driver owns planning and resume dispatch; release is event-driven over `status=queued` in the store, one pass per trigger (`python -m orchestrator.release`) (ADR-0003, ADR-0007) |
+| Orchestrator | Python driver (planning) + two ADK Workflows (per-item, release) | the per-item pipeline and the release pass each run as their own ADK graph — separate control loops with separate clocks; the driver owns planning and resume dispatch; release is event-driven over `status=queued` in the store, one pass per trigger (`python -m sdlc.app.release`) (ADR-0003, ADR-0007) |
 
 ## The one MCP boundary
 
@@ -98,12 +98,12 @@ incident paths (per-caller bearer tokens).
 ## Knowledge architecture
 
 Knowledge splits by owner (ADR-0001): design invariants (structural,
-never injected) · step base prompts (`sdlc_steps/<step>/prompts.md`,
+never injected) · step base prompts (`sdlc/steps/<step>/prompts.md`,
 system-owned, open with immutable core rules) · step policy defaults
-(`sdlc_steps/<step>/policy.yaml`; cross-step keys in
-`sdlc_steps/policy.yaml`; pipeline flow control in
-`sdlc_steps/orchestrator/policy.yaml`) · project overlays mirroring the
-same hierarchy (`projects-config/<name>/sdlc_steps/<step>/` —
+(`sdlc/steps/<step>/policy.yaml`; cross-step keys in
+`sdlc/steps/policy.yaml`; pipeline flow control in
+`sdlc/steps/orchestrator/policy.yaml`) · project overlays mirroring the
+same hierarchy (`projects-config/<name>/steps/<step>/` —
 customised-prompt.md extends prompts, policy.yaml overrides numbers) ·
 ADRs (for humans, never injected).
 
@@ -139,12 +139,12 @@ engine-enforced rather than configurable.
 
 ## Framework boundary (ADR-0007)
 
-The SDLC core is framework-agnostic: `orchestrator/invoker.py` defines
+The SDLC core is framework-agnostic: `sdlc/ports/agents.py` defines
 the AgentInvoker port (AgentSpec in — prompt, model name, declared tool
-needs — Invocation out), and `sdlc_steps/*/spec.py` DECLARE tools
+needs — Invocation out), and `sdlc/steps/*/spec.py` DECLARE tools
 (plain callables, or a `StoreTools` filter) rather than constructing
-them. Three ports draw the boundary: `orchestrator/invoker.py`
-(AgentInvoker, agent turns) and `orchestrator/executor.py`
+them. Three ports draw the boundary: `sdlc/ports/agents.py`
+(AgentInvoker, agent turns) and `sdlc/ports/execution.py`
 (PipelineExecutor, the per-item pipeline; ReleaseExecutor, the release
 pass). Exactly one package speaks ADK: `adapters/adk/` materializes
 specs into `LlmAgent`s (LiteLLM bridging, MCP toolsets, token metering
@@ -155,12 +155,12 @@ it; fix/flag loops are routed cycle edges, the human gate is a native
 `RequestInput` suspend) and the release pass (`release_workflow.py`:
 incident hygiene → store-queue walk as a routed cycle, one PR at a
 time). Two composition roots choose the framework
-(`orchestrator/__main__.py` and `orchestrator/release.py`), injecting
+(`sdlc/app/sprint.py` and `sdlc/app/release.py`), injecting
 the ports each runs. `tests/test_framework_boundary.py` enforces the
 boundary structurally (the core imports no framework);
 `tests/test_item_workflow.py` and `tests/test_release_workflow.py` run
 both graphs end-to-end on ADK's engine with handlers stubbed; structured
-verdicts (`orchestrator/schemas.py`) validate every agent decision at
+verdicts (`sdlc/governance/schemas.py`) validate every agent decision at
 the boundary.
 
 Dev loop: `make adk-web` (entries in `tests/debug/adk_web/`, one shared

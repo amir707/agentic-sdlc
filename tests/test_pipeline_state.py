@@ -1,7 +1,7 @@
 """orchestrator/pipeline: the per-item graph's typed vocabulary."""
 
-from adapters.adk.workflow import EDGE_TABLE
-from orchestrator.pipeline import PipelineState, Route
+from sdlc.adapters.adk.item_workflow import EDGE_TABLE
+from sdlc.sprint.pipeline import PipelineState, Route
 
 
 def test_every_route_in_the_edge_table_is_a_route_member_and_vice_versa():

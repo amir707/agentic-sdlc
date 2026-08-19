@@ -30,7 +30,7 @@ from sdlc.sprint import actions as steps
 from sdlc.engine.dependency_graph import UnparseableSource
 from sdlc.governance.gate import check_decision
 from sdlc.governance.rejection import Rejection
-from sdlc_steps.verify import VerifyResult
+from sdlc.steps.verify import VerifyResult
 
 
 @dataclass

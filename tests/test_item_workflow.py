@@ -13,10 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import pipeline, steps
-from orchestrator.dependency_graph import UnparseableSource
-from adapters.adk import workflow as wf
-from adapters.adk.executor import run_item_workflow
+from sdlc.sprint import pipeline
+
+from sdlc.sprint import actions as steps
+from sdlc.engine.dependency_graph import UnparseableSource
+from sdlc.adapters.adk import item_workflow as wf
+from sdlc.adapters.adk.executor import run_item_workflow
 
 ITEM = {"id": "PAY-1", "title": "add fee", "implementation": "agent"}
 
@@ -86,9 +88,9 @@ def stubs(monkeypatch):
                         _async_return(SimpleNamespace(
                             kind="approve", author="amir707", reason="",
                             comment_index=0)))
-    # bounces go through orchestrator.governance, which binds reject at
+    # bounces go through sdlc.governance.outcomes, which binds reject at
     # import time — patch the name governance actually calls
-    import orchestrator.governance as gov
+    import sdlc.governance.outcomes as gov
     monkeypatch.setattr(gov, "reject", _async_noop())
     return calls
 

@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from orchestrator.definition import (  # noqa: E402
+from sdlc.definition import (  # noqa: E402
     GATE, PER_ITEM_EDGES, REASONING, SDLC, START, TERMINALS)
 
 DOC = ROOT / "docs" / "architecture.md"

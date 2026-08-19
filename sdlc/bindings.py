@@ -29,7 +29,7 @@ from sdlc.release.flow import (  # noqa: F401
 from sdlc.sprint.flow import process_item, run_pipeline  # noqa: F401
 from sdlc.sprint.actions import (
     review_once, run_approver, run_coder, run_preprod_ci, verify_once)
-from sdlc_steps import incident_resolver
+from sdlc.steps import incident_resolver
 
 
 # The explicit binding: definition step name -> handler.

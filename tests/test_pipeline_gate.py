@@ -6,8 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import governance, pipeline, steps
-from orchestrator.pipeline import GateWait, PipelineState, Route
+from sdlc import governance
+from sdlc.governance import outcomes
+
+from sdlc.sprint import pipeline
+
+from sdlc.sprint import actions as steps
+from sdlc.sprint.pipeline import GateWait, PipelineState, Route
 
 
 class Ctx:
@@ -34,7 +39,7 @@ ITEM = {"id": "PAY-101", "title": "x"}
 def quiet(monkeypatch):
     async def no_reject(*a, **k):
         pass
-    monkeypatch.setattr(governance, "reject", no_reject)
+    monkeypatch.setattr(outcomes, "reject", no_reject)
 
 
 def _verified(needs_flag):

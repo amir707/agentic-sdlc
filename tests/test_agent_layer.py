@@ -7,12 +7,12 @@ import json
 import httpx
 import pytest
 
-from adapters.adk.invoker import _resolve_model
-from adapters.repo_host import GitHubRepoHost, RepoHostError
-from orchestrator.config import load_project
-from orchestrator.invoker import StoreTools
-from orchestrator.json_util import extract_json
-from tools.fs_tools import make_workspace_tools
+from sdlc.adapters.adk.invoker import _resolve_model
+from sdlc.adapters.github import GitHubRepoHost, RepoHostError
+from sdlc.engine.config import load_project
+from sdlc.ports.agents import StoreTools
+from sdlc.engine.json_util import extract_json
+from sdlc.tools.fs_tools import make_workspace_tools
 
 
 # --- workspace sandbox -------------------------------------------------------
@@ -62,9 +62,9 @@ def test_specs_compose_prompts_and_models(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_TOKEN_AGENTS", "t-agents")
     monkeypatch.setenv("CODER_MODEL", "anthropic/claude-sonnet-5")
     monkeypatch.setenv("REVIEWER_MODEL", "gemini-flash-latest")
-    from sdlc_steps.code_reviewer import spec as reviewer_spec
-    from sdlc_steps.coder import spec as coder_spec
-    from sdlc_steps.release_manager import spec as rm_spec
+    from sdlc.steps.code_reviewer import spec as reviewer_spec
+    from sdlc.steps.coder import spec as coder_spec
+    from sdlc.steps.release_manager import spec as rm_spec
 
     project = load_project("candidate-app")
     coder = coder_spec.build(project, str(tmp_path))
@@ -167,7 +167,7 @@ def test_repo_host_raises_on_error():
 
 
 def test_transient_error_detection_and_backoff():
-    from adapters.adk.invoker import _is_transient, _retry_seconds
+    from sdlc.adapters.adk.invoker import _is_transient, _retry_seconds
 
     gemini_429 = Exception(
         "429 RESOURCE_EXHAUSTED. ... Please retry in 8.478154025s.")
@@ -192,7 +192,7 @@ def test_gemini_requests_are_paced():
     import asyncio
     import time
 
-    from adapters.adk.invoker import MinIntervalLimiter
+    from sdlc.adapters.adk.invoker import MinIntervalLimiter
 
     async def scenario():
         limiter = MinIntervalLimiter(0.05)

@@ -15,7 +15,7 @@ processes.
 The core describes agents declaratively; exactly one adapter package
 speaks ADK:
 
-- `orchestrator/invoker.py` — the AgentInvoker PORT: `AgentSpec`
+- `sdlc/ports/agents.py` — the AgentInvoker PORT: `AgentSpec`
   (prompt, model name, tool NEEDS — plain callables or a `StoreTools`
   filter), `Invocation` (text + token usage), and the invoke Protocol.
   No framework imports.
@@ -27,18 +27,18 @@ speaks ADK:
   `Workflow` whose routed cycle edges realize the definition's
   back-edges — same single-shot step functions the driver uses,
   nothing reimplemented.
-- The composition root (`orchestrator/__main__.py`) is the only place
+- The composition root (`sdlc/app/sprint.py`) is the only place
   a framework is chosen and injected.
 
 Enforced structurally: `tests/test_framework_boundary.py` fails if
-`orchestrator/`, `sdlc_steps/`, `tools/`, or `mcp_server/` ever import
+`orchestrator/`, `sdlc/steps/`, `sdlc/tools/`, or `mcp_server/` ever import
 `google.adk` (or the adapter), and asserts the Workflow expression
-stays in parity with `orchestrator/definition.py`.
+stays in parity with `sdlc/definition.py`.
 
 ## Consequences
 
 ADK is demonstrated deeply (LlmAgent, LiteLLM, McpToolset, callbacks,
 output_schema, Workflow, adk web) yet remains swappable: a second
 framework is one new adapter and one changed line at the composition
-root. Structured verdicts (`orchestrator/schemas.py`) validate every
+root. Structured verdicts (`sdlc/governance/schemas.py`) validate every
 agent decision at the boundary regardless of framework.

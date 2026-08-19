@@ -5,7 +5,7 @@ steps run, in what order, of what kind, with which bounded back-edges.
 It contains no execution logic (planning.py, steps.py, pipeline.py,
 sprint.py, release_flow.py) and no engine mechanics: customizing the
 SDLC means editing THIS definition (steps + the per-item graph), adding
-a folder under sdlc_steps/, and binding it in driver.HANDLERS — engine
+a folder under sdlc/steps/, and binding it in driver.HANDLERS — engine
 code stays untouched.
 
 This definition is LOAD-BEARING: sdlc/adapters/adk/item_workflow.py builds the
@@ -14,9 +14,9 @@ redefine), and docs/architecture.md's pipeline diagram is generated
 from the same data (scripts/render_pipeline.py). One definition, no
 shadows.
 
-Step names refer to sdlc_steps/<name>/ packages (their knowledge AND
+Step names refer to sdlc/steps/<name>/ packages (their knowledge AND
 implementation). Back-edge iteration bounds are policy KEYS resolved
-from sdlc_steps/orchestrator/policy.yaml (+ project overlays) — the
+from sdlc.steps/orchestrator/policy.yaml (+ project overlays) — the
 definition names the rule, never the number.
 
 Three phases:
@@ -47,7 +47,7 @@ class BackEdge:
 
 @dataclass(frozen=True)
 class Step:
-    name: str                     # = sdlc_steps/<name>/
+    name: str                     # = sdlc/steps/<name>/
     kind: str
     back_edge: BackEdge | None = None
 
