@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from sdlc.definition import PipelineShape
 from sdlc.sprint import pipeline
 
 from sdlc.sprint import actions as steps
@@ -33,7 +34,8 @@ class Recorder:
             "approver": {"approvers": ["amir707"], "gate_mode": gate,
                          "gate_wait_minutes": 1, "gate_poll_seconds": 0},
         }
-        self.project = SimpleNamespace(policy=self._policies.get)
+        self.project = SimpleNamespace(policy=self._policies.get,
+                                       shape=PipelineShape())
         self.store = None
         self.repo_host = SimpleNamespace(post_comment=lambda *a, **k: None)
         self.ci_lock = asyncio.Lock()
@@ -250,3 +252,24 @@ def test_gate_env_zero_budget_gives_one_look_then_parks(stubs, monkeypatch):
     outcome = _run(ctx)
     assert outcome.kind == "awaiting" and outcome.pr == 42
     assert looks["n"] == 1
+
+
+# --- the per-project SHAPE (proposal 0001 §7) -----------------------------------
+
+def test_no_human_gate_shape_queues_after_the_dossier_without_asking(stubs, monkeypatch):
+    """pipeline.yaml human_gate: false — the approver still posts its
+    dossier (audit artifact), the item queues immediately, the gate is
+    never consulted, and awaiting_approval never appears."""
+    looked = []
+
+    async def never(*a, **k):
+        looked.append(1)
+        return None
+    monkeypatch.setattr(pipeline, "check_decision", never)
+    ctx = Recorder()
+    ctx.project.shape = PipelineShape(human_gate=False)
+    outcome = _run(ctx)
+    assert outcome.kind == "queued" and outcome.pr == 42
+    assert looked == []                                   # gate never looked
+    statuses = [s for _, s, _ in ctx.statuses]
+    assert "awaiting_approval" not in statuses and statuses[-1] == "queued"

@@ -147,6 +147,19 @@ SAMPLE_BACKLOG = """\
 ]
 """
 
+PIPELINE_YAML = '''# The pipeline SHAPE for this project (engine: sdlc/definition.py,
+# PipelineShape). Only the axes that are SAFE to vary are configurable;
+# the coder/review loop, verify + flag policy, preprod, the release
+# guard and the audit are engine guarantees and are not knobs — an
+# unknown key here fails the load on purpose.
+#
+# human_gate: a human must /approve on the PR before an item is queued
+# for release. false = the approver still posts its dossier (the audit
+# artifact) and the item queues immediately after preprod passes —
+# for a low-risk internal tool, say. Default: true.
+human_gate: true
+'''
+
 PROJECT_README = """\
 # {name} — project bundle
 
@@ -172,6 +185,9 @@ Run a sprint with:
   Refine `areas` early: they drive verification and release holds.
 - `backlog.json` — the sprint input. Replace the SAMPLE item; keep the
   same fields (`implementation`: agent | human).
+- `pipeline.yaml` — the pipeline SHAPE: today `human_gate: true|false`.
+  Guarantees (review loop, verify, preprod, release guard, audit) are
+  not knobs; unknown keys are rejected.
 - `.env` (copy of `.env.example`) — this project's secrets.
 
 ## Extending per step (overlays, all optional)
@@ -231,6 +247,7 @@ def _scaffold(project_dir: Path, name: str) -> None:
         "# Who may decide the human gate (/approve, /reject, /hold).\n"
         "approvers:\n" +
         "".join(f"  - {a}\n" for a in approvers))
+    (project_dir / "pipeline.yaml").write_text(PIPELINE_YAML)
     (project_dir / "README.md").write_text(PROJECT_README.format(name=name))
     ok(f"bundle written — see projects-config/{name}/README.md for the "
        "extension points")

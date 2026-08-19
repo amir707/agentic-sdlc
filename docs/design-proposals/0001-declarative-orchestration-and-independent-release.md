@@ -359,6 +359,13 @@ The engine already separates *what* (`definition.py`, `sdlc_steps/*`) from
 *mechanics* (engine/), and projects already overlay policy and prompts
 (`projects-config/<p>/`). Extend that to the whole pipeline:
 
+> **Status (first increment landed):** item 1 is real for the safe axis —
+> `projects-config/<name>/pipeline.yaml` sets a `PipelineShape`
+> (`human_gate: true|false`), `sdlc/definition.py::per_item_edges(shape)`
+> composes the graph and the ADK adapter builds from it; item 4 is
+> enforced in code (unknown keys are rejected — guarantees are not knobs).
+> Items 2 (behavior catalog) and 3 remain future work.
+
 1. **Pipeline shape becomes per-project data.** Move `definition.py` (the
    graph: steps, order, back-edges) into each project bundle. The engine
    loads it and builds the ADK `Workflow` (Workstream A) from it. Two

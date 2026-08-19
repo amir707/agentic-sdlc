@@ -8,6 +8,11 @@ SDLC means editing THIS definition (steps + the per-item graph), adding
 a folder under sdlc/steps/, and binding it in driver.HANDLERS — engine
 code stays untouched.
 
+A project may vary the pipeline's SHAPE along axes that are safe to
+vary (PipelineShape, from projects-config/<name>/pipeline.yaml — today:
+human_gate); per_item_edges(shape) composes the graph. Guarantees are
+not knobs and unknown keys are rejected (proposal 0001 §7).
+
 This definition is LOAD-BEARING: sdlc/adapters/adk/item_workflow.py builds the
 executing ADK graph from PER_ITEM_EDGES below (it renders, it does not
 redefine), and docs/architecture.md's pipeline diagram is generated
@@ -122,32 +127,81 @@ class Route(StrEnum):
 START = "START"
 TERMINALS = ("queued", "rejected", "failed", "escalated")
 
-# (source, target, route | None) — an unrouted edge is the only way out.
-PER_ITEM_EDGES: tuple[tuple[str, str, Route | None], ...] = (
-    (START, "coder", None),
-    ("coder", "code_reviewer", None),
-    ("code_reviewer", "verify", Route.APPROVED),
-    ("code_reviewer", "coder_fix", Route.CHANGES_REQUESTED),
-    ("code_reviewer", "rejected", Route.OUT_OF_SCOPE),
-    ("code_reviewer", "escalated", Route.ESCALATE),
-    ("coder_fix", "code_reviewer", Route.FIXED),
-    ("coder_fix", "escalated", Route.IMPASSE),
-    ("verify", "preprod_ci", Route.LABELED),
-    ("verify", "coder_flag_fix", Route.POLICY_FLAG_REQUIRED),
-    ("verify", "escalated", Route.ESCALATE),
-    ("coder_flag_fix", "verify", None),
-    ("preprod_ci", "approver", Route.PASSED),
-    ("preprod_ci", "failed", Route.FAILED),
-    ("approver", "approval_gate", None),
-    ("approval_gate", "queued", Route.APPROVE),
-    ("approval_gate", "rejected", Route.REJECT),
-)
+# --- the per-project SHAPE (proposal 0001 §7, first increment) ------------------
+#
+# A project may vary the pipeline's shape along axes that are SAFE to
+# vary; everything else is a load-bearing guarantee (G1-G6) and is not a
+# knob. The line is drawn HERE, in code, not in a config schema:
+#   - human_gate: whether a human /approve on the PR is required before
+#     an item is queued for release. Off = the approver still posts its
+#     dossier (the audit artifact) and the item queues immediately; the
+#     machine gates (verify, preprod) and the release guard still run.
+# NOT configurable: the coder/review loop, verify + flag policy, preprod
+# (release promotes the revision it produces), the release guard, the
+# audit. projects-config/<name>/pipeline.yaml sets the shape; unknown
+# keys are rejected so a guarantee cannot be "turned off" by typo.
+
+@dataclass(frozen=True)
+class PipelineShape:
+    human_gate: bool = True
+
+    @classmethod
+    def from_mapping(cls, data: dict | None) -> "PipelineShape":
+        data = dict(data or {})
+        unknown = set(data) - {f for f in cls.__dataclass_fields__}
+        if unknown:
+            raise ValueError(
+                f"pipeline.yaml: unknown key(s) {sorted(unknown)} — the "
+                f"configurable shape is {sorted(cls.__dataclass_fields__)}; "
+                "everything else is an engine guarantee, not a knob")
+        for key, value in data.items():
+            if not isinstance(value, bool):
+                raise ValueError(f"pipeline.yaml: {key} must be true|false")
+        return cls(**data)
 
 
-def per_item_nodes() -> tuple[str, ...]:
+DEFAULT_SHAPE = PipelineShape()
+
+
+def per_item_edges(shape: PipelineShape = DEFAULT_SHAPE
+                   ) -> tuple[tuple[str, str, Route | None], ...]:
+    """The per-item graph for one project's shape:
+    (source, target, route | None) — an unrouted edge is the only way out."""
+    edges: list[tuple[str, str, Route | None]] = [
+        (START, "coder", None),
+        ("coder", "code_reviewer", None),
+        ("code_reviewer", "verify", Route.APPROVED),
+        ("code_reviewer", "coder_fix", Route.CHANGES_REQUESTED),
+        ("code_reviewer", "rejected", Route.OUT_OF_SCOPE),
+        ("code_reviewer", "escalated", Route.ESCALATE),
+        ("coder_fix", "code_reviewer", Route.FIXED),
+        ("coder_fix", "escalated", Route.IMPASSE),
+        ("verify", "preprod_ci", Route.LABELED),
+        ("verify", "coder_flag_fix", Route.POLICY_FLAG_REQUIRED),
+        ("verify", "escalated", Route.ESCALATE),
+        ("coder_flag_fix", "verify", None),
+        ("preprod_ci", "approver", Route.PASSED),
+        ("preprod_ci", "failed", Route.FAILED),
+    ]
+    if shape.human_gate:
+        edges += [
+            ("approver", "approval_gate", None),
+            ("approval_gate", "queued", Route.APPROVE),
+            ("approval_gate", "rejected", Route.REJECT),
+        ]
+    else:
+        edges += [("approver", "queued", None)]   # dossier posted, no gate
+    return tuple(edges)
+
+
+# The default shape's graph — what the docs render and most tests pin.
+PER_ITEM_EDGES = per_item_edges(DEFAULT_SHAPE)
+
+
+def per_item_nodes(edges=PER_ITEM_EDGES) -> tuple[str, ...]:
     """Every node the graph names, in first-appearance order."""
     seen: list[str] = []
-    for src, dst, _ in PER_ITEM_EDGES:
+    for src, dst, _ in edges:
         for n in (src, dst):
             if n != START and n not in seen:
                 seen.append(n)
