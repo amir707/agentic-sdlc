@@ -11,6 +11,8 @@ Invoked by the orchestrator before each release_manager pass, and by
 the demo loop periodically.
 """
 
+from sdlc.engine.narrate import say
+
 
 
 def decide(open_incidents: list[dict], samples_by_area: dict[str, list[dict]],
@@ -64,7 +66,7 @@ async def run(project, store=None) -> list[dict]:
         incident = resolution["incident"]
         await store.call("resolve_incident", incident_id=incident["id"],
                          factors=resolution["factors"])
-        print(f"[resolver] resolved incident #{incident['id']} "
-              f"({incident['area']})", flush=True)
+        say("resolver", f"resolved incident #{incident['id']} "
+              f"({incident['area']})")
         applied.append(resolution)
     return applied

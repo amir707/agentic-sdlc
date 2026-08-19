@@ -25,6 +25,7 @@ from google.genai import types
 
 from sdlc.release import flow as release_flow
 from sdlc.steps import incident_resolver
+from sdlc.engine.narrate import say
 
 _APP_NAME = "agentic_sdlc_release"
 
@@ -68,11 +69,11 @@ def build_release_workflow(ctx) -> Workflow:
         state["queue"] = await release_flow.release_queue(ctx)
         if not state["queue"]:
             ctx.board.finish("RELEASE", "queue empty")
-            print("[release] queue empty", flush=True)
+            say("release", "queue empty")
             return Event(output={"outcome": "empty"}, route="empty")
         listing = ", ".join(f"#{i['pr']} ({i['id']})" for i in state["queue"])
-        print(f"[release] queue: {len(state['queue'])} PR(s) — {listing} "
-              "(one decision, one deployment at a time)", flush=True)
+        say("release", f"queue: {len(state['queue'])} PR(s) — {listing} "
+              "(one decision, one deployment at a time)")
         return Event(output=len(state["queue"]), route="has_items")
 
     async def decide_pr(node_input):
@@ -95,7 +96,7 @@ def build_release_workflow(ctx) -> Workflow:
             for _, outcome in state["outcomes"]:
                 tally[outcome] = tally.get(outcome, 0) + 1
             summary = ", ".join(f"{n} {kind}" for kind, n in tally.items())
-            print(f"[release] pass complete: {summary}", flush=True)
+            say("release", f"pass complete: {summary}")
         return {"outcome": "pass_complete"}
 
     nodes = {"incident_hygiene": incident_hygiene, "load_queue": load_queue,

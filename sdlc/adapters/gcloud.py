@@ -26,6 +26,7 @@ import sys
 import time
 from sdlc.engine import redact
 from sdlc.ports.world import DeployError  # noqa: F401 (raised here, defined by the core)
+from sdlc.engine.narrate import say
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -88,15 +89,15 @@ def _run(args: list[str], attempts: int = 2) -> None:
     """Bounded, transient-aware execution (the invoker's 429 pattern,
     for infrastructure): a transient failure gets ONE retry; everything
     else fails fast with the redacted command AND gcloud's actual error."""
-    print("+", " ".join(redact.env_args(a) for a in args), flush=True)
+    say("deploy", "+ " + " ".join(redact.env_args(a) for a in args))
     for attempt in range(attempts):
         code, stderr_tail = _execute(args)
         if code == 0:
             return
         transient = any(m in stderr_tail for m in _TRANSIENT_MARKERS)
         if transient and attempt < attempts - 1:
-            print(f"[deploy] transient failure (attempt {attempt + 1}/"
-                  f"{attempts}); retrying in 10s", flush=True)
+            say("deploy", f"transient failure (attempt {attempt + 1}/"
+                  f"{attempts}); retrying in 10s")
             time.sleep(10)
             continue
         raise DeployError(

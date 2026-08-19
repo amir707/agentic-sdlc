@@ -213,7 +213,7 @@ gcloud run jobs create orchestrator --image "$IMAGE" --region "$REGION" \
   --service-account "$SA_EMAIL" \
   --command=python --args=-m,sdlc.app.sprint,--project,candidate-app,--parallel,2 \
   --task-timeout=3600 --max-retries=0 --memory=2Gi --cpu=2 \
-  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
+  --set-env-vars="DELIVERY_STORE_URL=$STORE_URL,STORE_IAM_AUTH=1,LOG_FORMAT=json,GCP_PROJECT=$PROJECT_ID,GCP_REGION=$REGION,CLOUD_RUN_SERVICE=candidate-app,CODER_MODEL=anthropic/claude-sonnet-5,REVIEWER_MODEL=gemini-flash-lite-latest,GEMINI_MODEL=gemini-flash-lite-latest,GEMINI_RPM=12" \
   --set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GITHUB_TOKEN=GITHUB_TOKEN:latest,CONFIG_TOKEN=CONFIG_TOKEN:latest,MCP_TOKEN_AGENTS=MCP_TOKEN_AGENTS:latest,MCP_TOKEN_RESOLVER=MCP_TOKEN_RESOLVER:latest
 
 # 9.6 run a sprint; approvals: comment /approve on the PR while the job

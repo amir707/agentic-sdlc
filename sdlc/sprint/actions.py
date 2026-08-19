@@ -27,6 +27,7 @@ from sdlc.steps.approver import spec as approver_spec
 from sdlc.steps.code_reviewer import spec as reviewer_spec
 from sdlc.steps.coder import spec as coder_spec
 from sdlc.tools.diff_analysis import files_touched
+from sdlc.engine.narrate import say
 
 
 def _slug(title: str) -> str:
@@ -77,8 +78,8 @@ async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
     # the branch is the identity, the PR is reused, review proceeds.
     existing = ctx.repo_host.find_open_pr(branch)
     if existing:
-        print(f"[coder] PR #{existing} already open for {item['id']} "
-              "(reusing)", flush=True)
+        say("coder", f"PR #{existing} already open for {item['id']} "
+              "(reusing)")
         return existing
     body = (f"Item: {item['id']}\n\n"
             f"claimed_risk: {item['claimed_risk']} | "
@@ -90,7 +91,7 @@ async def open_pr(ctx: RunContext, item: dict, branch: str) -> int:
     # The item<->PR mapping lives in the audit trail (status views use it).
     await ctx.audit(Actor.CODER, Decision.OPEN_PR,
                     {"item": item["id"], "pr": pr, "branch": branch})
-    print(f"[coder] PR #{pr} opened for {item['id']}", flush=True)
+    say("coder", f"PR #{pr} opened for {item['id']}")
     return pr
 
 
@@ -168,8 +169,8 @@ async def run_approver(ctx: RunContext, item: dict, pr: int,
     comments = ctx.repo_host.get_review_threads(pr)
     existing = find_marker(comments, marker("dossier", sha))
     if existing is not None:
-        print(f"[resume] PR #{pr}: dossier already posted for {sha[:7]} — "
-              "reusing", flush=True)
+        say("resume", f"PR #{pr}: dossier already posted for {sha[:7]} — "
+              "reusing")
         return existing + 1
 
     ctx.board.begin(item["id"], "approver", f"PR #{pr} assembling dossier")

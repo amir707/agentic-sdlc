@@ -30,11 +30,12 @@ from pathlib import Path
 
 from sdlc.engine.workspace import Workspace
 from sdlc.engine import redact
+from sdlc.engine.narrate import say
 from sdlc.engine.paths import REPO_ROOT
 def _log(message: str) -> None:
     # Info goes to stderr so the CLI's stdout stays machine-readable
     # (scripts capture `python -m sdlc.engine.provisioning` output).
-    print(f"[provision] {message}", file=sys.stderr, flush=True)
+    say("provision", message, stream=sys.stderr)
 
 
 def scratch_root() -> Path:

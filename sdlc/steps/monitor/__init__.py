@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx
 
 from sdlc.engine.config import load_project          # noqa: E402
+from sdlc.engine.narrate import say
 
 
 def window_error_rate(samples: deque, window_seconds: float,
@@ -64,14 +65,13 @@ async def probe_loop(url: str, project, store) -> None:
                     await store.call("record_health_sample",
                                      area=area, error_rate=round(rate, 3))
                     marker = "DEGRADED" if rate > threshold else "ok"
-                    print(f"[monitor] {area}: error_rate={rate:.2f} {marker}",
-                          flush=True)
+                    say("monitor", f"{area}: error_rate={rate:.2f} {marker}")
                     if rate > threshold:
                         incident = await store.call(
                             "open_incident", area=area,
                             error_rate=round(rate, 3))
-                        print(f"[monitor] incident #{incident['id']} open "
-                              f"for {area}", flush=True)
+                        say("monitor", f"incident #{incident['id']} open "
+                              f"for {area}")
 
             await asyncio.sleep(interval)
 
@@ -85,8 +85,8 @@ def main() -> None:
     project = load_project(args.project)
     from sdlc.adapters.store_client import DeliveryStore  # the monitor's own wiring
     store = DeliveryStore.for_monitor()
-    print(f"[monitor] probing {args.url} for areas "
-          f"{sorted(project.smoke_endpoints)}", flush=True)
+    say("monitor", f"probing {args.url} for areas "
+          f"{sorted(project.smoke_endpoints)}")
     asyncio.run(probe_loop(args.url.rstrip("/"), project, store))
 
 

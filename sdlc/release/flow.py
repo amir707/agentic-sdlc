@@ -24,6 +24,7 @@ from sdlc.engine.json_util import extract_json
 from sdlc.ports.world import DeployError, RepoHostError
 from sdlc.governance.gates import preprod_passed_for_head, run_preprod_ci, verify_once
 from sdlc.steps.release_manager import spec as rm_spec
+from sdlc.engine.narrate import say
 
 
 async def release_queue(ctx: RunContext) -> list[dict]:
@@ -60,8 +61,7 @@ async def trigger_release(ctx: RunContext) -> None:
         await run_release_pass(ctx)
         return
     from sdlc.engine.heartbeat import post_event
-    print(f"[release] delegating to the release service ({url})",
-          flush=True)
+    say("release", f"delegating to the release service ({url})")
     await post_event(url, "sprint-delegate")
 
 
@@ -97,8 +97,7 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
     # deterministic and idempotent; this IS the deterministic merge gate.
     pr_data = ctx.repo_host.get_pr(pr)
     head = pr_data["head_sha"]
-    print(f"[release] deciding PR #{pr} ({item['id']}) — head {head[:7]}",
-          flush=True)
+    say("release", f"deciding PR #{pr} ({item['id']}) — head {head[:7]}")
     ctx.workspace.checkout_detached(pr_data["head_ref"])
     try:
         verified = await verify_once(ctx, item, pr)
@@ -115,8 +114,8 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
             "post-approval head violates the flag policy", head_sha=head)
         return "escalated"
     if not preprod_passed_for_head(ctx, pr, head):
-        print(f"[release] PR #{pr}: head {head[:7]} has no passing preprod "
-              "— deploying it now", flush=True)
+        say("release", f"PR #{pr}: head {head[:7]} has no passing preprod "
+              "— deploying it now")
         async with ctx.ci_lock:
             ci_ok = await run_preprod_ci(ctx, item, pr, verified)
         ctx.board.finish(item["id"], "head re-verified + preprod deployed")
@@ -126,10 +125,10 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
                                   head_sha=head)
             return "failed"
 
-    print(f"[release] PR #{pr} verified: area={verified.primary_area} "
+    say("release", f"PR #{pr} verified: area={verified.primary_area} "
           f"risk={verified.verified_risk} "
           f"flag={'yes' if verified.flag['covered'] else 'no'} — asking the "
-          "release manager", flush=True)
+          "release manager")
     ctx.board.begin("RELEASE", "release_manager", f"deciding PR #{pr}")
     payload = {
         "task": ("Decide merge or hold for THIS ONE PR, right now. "
@@ -197,17 +196,17 @@ async def _decide_release_pr(ctx: RunContext, item: dict,
         await ctx.audit(Actor.RELEASE_MANAGER, Decision.MERGE_PR, factors)
         await ctx.set_status(item["id"], ItemStatus.RELEASED, pr)
         rule = decision.factors.get("dominating_rule", "")
-        print(f"[release] MERGED PR #{pr} (traffic -> pr-{pr})"
-              + (f" — rule: {rule}" if rule else "")
-              + f" — {decision.reasoning[:140]}", flush=True)
+        say("release", f"MERGED PR #{pr} (traffic -> pr-{pr})"
+            + (f" — rule: {rule}" if rule else "")
+            + f" — {decision.reasoning[:140]}", pr=pr, item=item["id"])
         return "merged"
     # Held: the item STAYS queued in the store and is reconsidered on the
     # next release EVENT (incident cleared, confidence window passed).
     await ctx.audit(Actor.RELEASE_MANAGER, Decision.HOLD_MERGE, factors)
     rule = decision.factors.get("dominating_rule", "")
-    print(f"[release] HELD PR #{pr}"
-          + (f" — rule: {rule}" if rule else "")
-          + f" — {decision.reasoning[:140]}", flush=True)
+    say("release", f"HELD PR #{pr}"
+        + (f" — rule: {rule}" if rule else "")
+        + f" — {decision.reasoning[:140]}", pr=pr, item=item["id"])
     return "held"
 
 

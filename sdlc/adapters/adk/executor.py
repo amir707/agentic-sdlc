@@ -22,6 +22,7 @@ from sdlc.adapters.adk.item_workflow import build_item_workflow
 from mcp_server.vocab import ItemStatus
 from sdlc.ports.execution import ItemOutcome
 from sdlc.sprint.pipeline import GateWait, pr_from_gate_interrupt
+from sdlc.engine.narrate import say
 
 _APP_NAME = "agentic_sdlc"
 
@@ -100,8 +101,8 @@ async def run_item_workflow(ctx, item: dict, branch: str,
             # next event (or rerun) re-check. The item stays awaiting.
             why = ("no decision on this look" if wait.budget_seconds <= 0
                    else f"no decision within {wait.budget_seconds / 60:.0f}m")
-            print(f"[gate] PR #{pr}: {why} — the item stays "
-                  "awaiting_approval; the next event re-checks", flush=True)
+            say("gate", f"PR #{pr}: {why} — the item stays "
+                  "awaiting_approval; the next event re-checks")
             return ItemOutcome(kind="awaiting", pr=pr)
         if action == "nudge":
             # The decision's authority is the GitHub comment; pressing
